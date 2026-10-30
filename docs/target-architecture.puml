@@ -6,6 +6,8 @@
 ' its CM7 image adds h755::filex_cm7, levelx_cm7, netx_cm7, usbx_cm7 and
 ' guix_cm7, each linked to h755::rtos_cm7 (KERNEL).
 ' Project libraries use namespaced aliases (h755::hal_cm7 -> h755_hal_cm7).
+' Both examples also link h755::rtt_cm7 / h755::rtt_cm4 (segger_add_rtt(),
+' linked to the chip target) for logging.
 ' Solid arrows: target_link_libraries (consumer --> dependency).
 ' Dotted arrows: function calls / generated files.
 

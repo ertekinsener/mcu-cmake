@@ -4,6 +4,7 @@
 #include <array>
 #include <cstdint>
 
+#include "SEGGER_RTT.h"
 #include "shared_mailbox.h"
 #include "stm32h7xx_hal.h"
 #include "tx_api.h"
@@ -38,6 +39,7 @@ void BlinkThread(ULONG /*input*/) {
   while (true) {
     shared_mailbox.cm4_counter = ++counter;
     HAL_GPIO_TogglePin(GPIOE, kLedPin);
+    SEGGER_RTT_printf(0, "cm4: blink %u\r\n", static_cast<unsigned>(counter));
     tx_thread_sleep(kBlinkPeriodTicks);
   }
 }
@@ -54,6 +56,8 @@ extern "C" void tx_application_define(void* /*first_unused_memory*/) {
 int main() {
   HAL_Init();
   InitLed();
+  SEGGER_RTT_Init();
+  SEGGER_RTT_WriteString(0, "cm4: ThreadX start\r\n");
 
   __disable_irq();  // see tx_glue.h
   tx_kernel_enter();

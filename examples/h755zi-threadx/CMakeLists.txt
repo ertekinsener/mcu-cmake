@@ -4,6 +4,7 @@ project(h755zi_threadx C CXX ASM)
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../../cmake")
 include(mcu)
 include(vendors/st/hal)
+include(vendors/segger/rtt)
 include(vendors/threadx/kernel)
 include(vendors/threadx/filex)
 include(vendors/threadx/levelx)
@@ -26,6 +27,9 @@ endif()
 if(NOT DEFINED THREADX_KERNEL_VERSION)
   set(THREADX_KERNEL_VERSION v6.5.2.202603_rel)
 endif()
+if(NOT DEFINED SEGGER_RTT_VERSION)
+  set(SEGGER_RTT_VERSION V8.58.0)
+endif()
 # The middleware follows the kernel release unless set separately.
 foreach(component FILEX LEVELX NETXDUO USBX GUIX)
   if(NOT DEFINED THREADX_${component}_VERSION)
@@ -42,6 +46,7 @@ threadx_fetch_levelx(GIT_TAG ${THREADX_LEVELX_VERSION})
 threadx_fetch_netxduo(GIT_TAG ${THREADX_NETXDUO_VERSION})
 threadx_fetch_usbx(GIT_TAG ${THREADX_USBX_VERSION})
 threadx_fetch_guix(GIT_TAG ${THREADX_GUIX_VERSION})
+segger_fetch_rtt(GIT_TAG ${SEGGER_RTT_VERSION})
 
 include("${CMAKE_CURRENT_SOURCE_DIR}/../common/stm32h755zi/stm32h755zi.cmake")
 
@@ -69,6 +74,10 @@ threadx_add_kernel(h755::rtos_cm7
   CONFIG h755::threadx_conf
 )
 
+# RTT log channel 0; the control block lands in DTCM (.bss), which is not
+# cached, so the probe sees writes immediately.
+segger_add_rtt(h755::rtt_cm7 CHIP stm32::H755ZI::CM7 PRINTF)
+
 # ThreadX middleware on the CM7, default configuration (no *_user.h) and the
 # kernel's port. Drivers: FileX RAM disk, LevelX NOR simulator, NetX Duo RAM
 # network driver; USBX and GUIX are only initialized.
@@ -84,6 +93,7 @@ target_link_libraries(firmware_cm7 PRIVATE
   h755::startup_cm7
   h755::hal_cm7
   h755::rtos_cm7
+  h755::rtt_cm7
   h755::filex_cm7
   h755::levelx_cm7
   h755::netx_cm7
@@ -122,12 +132,17 @@ threadx_add_kernel(h755::rtos_cm4
   CONFIG h755::threadx_conf
 )
 
+# RTT log channel 0; the control block lands in D2 SRAM (.bss). The CM4 has
+# no data cache.
+segger_add_rtt(h755::rtt_cm4 CHIP stm32::H755ZI::CM4 PRINTF)
+
 add_executable(firmware_cm4 cm4/main.cc common/tx_glue.cc)
 target_compile_features(firmware_cm4 PRIVATE cxx_std_23)
 target_link_libraries(firmware_cm4 PRIVATE
   h755::startup_cm4
   h755::hal_cm4
   h755::rtos_cm4
+  h755::rtt_cm4
   h755::common
   mcu::cxx_bare_metal
   mcu::newlib_nano

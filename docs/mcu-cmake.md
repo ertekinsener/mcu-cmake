@@ -1,7 +1,7 @@
 # mcu-cmake
 
 A small, target-based CMake module for bare-metal MCU firmware. The core is
-vendor-neutral; vendor packages (CMSIS, HAL, FreeRTOS, ThreadX, ...) live in separate modules,
+vendor-neutral; vendor packages (CMSIS, HAL, FreeRTOS, ThreadX, SEGGER RTT, ...) live in separate modules,
 one file per package, and are fetched from upstream git at versions chosen by
 the project.
 
@@ -51,6 +51,7 @@ Diagrams:
 | [cmake/vendors/threadx/usbx.cmake](../cmake/vendors/threadx/usbx.cmake) | `threadx_fetch_usbx()`, `threadx_add_usbx()` |
 | [cmake/vendors/threadx/guix.cmake](../cmake/vendors/threadx/guix.cmake) | `threadx_fetch_guix()`, `threadx_add_guix()` |
 | [cmake/vendors/threadx/common.cmake](../cmake/vendors/threadx/common.cmake) | Shared helpers of the ThreadX modules |
+| [cmake/vendors/segger/rtt.cmake](../cmake/vendors/segger/rtt.cmake) | `segger_fetch_rtt()`, `segger_add_rtt()` |
 
 Requirements: CMake 3.25+, git, arm-none-eabi-gcc with newlib-nano,
 binutils 2.38+ (for `READONLY` in the linker script).
@@ -468,13 +469,49 @@ threadx_add_guix(<name>    KERNEL <kernel> [PORT <port>] [CONFIG <target>])
 - GUIX: only `common/` and `ports/` are fetched; there is no GNU port for
   `cortex_m33`.
 
+### SEGGER: `vendors/segger/rtt`
+
+```
+segger_fetch_rtt(GIT_TAG <tag|commit> [GIT_REPOSITORY <url>])
+
+segger_add_rtt(<name>
+  CHIP <chip target>
+  [CONFIG <target>]
+  [PRINTF]
+  [SYSCALLS])
+```
+
+- Vendor-neutral RTT target sources. Default repository: `SEGGERMicro/RTT`
+  (tags such as `V8.58.0`).
+- Creates a **STATIC** library built with the chip's flags, one per core.
+  `SEGGER_RTT_ASM_ARMv7M.S` is added when ASM is enabled (RTT itself selects
+  the assembly path on ARMv7-M / ARMv8-M); without ASM, `RTT_USE_ASM=0` is
+  defined.
+- `CONFIG` provides the project's `SEGGER_RTT_Conf.h`; the package's
+  `Config/` directory is then not on the include path, so the project copy
+  wins. Without `CONFIG` the default configuration is used (1 KiB up buffer,
+  16 B down buffer, non-blocking skip mode, lock via `BASEPRI` = 0x20 on
+  ARMv7-M).
+- `PRINTF` adds `SEGGER_RTT_printf()`: formatted output without stdio and
+  without `malloc`. Recommended for bare-metal logging.
+- `SYSCALLS` adds newlib retargeting (`_write()` -> RTT channel 0), so
+  `printf()` / `puts()` go to RTT. It forces `_write` to be linked from this
+  library (see [Toolchain pitfalls](#toolchain-pitfalls)). newlib's
+  `printf()` still pulls stdio, `malloc` / `_sbrk` (needs `HEAP_SIZE` > 0)
+  and the other nosys stubs.
+- The control block `_SEGGER_RTT` and the buffers are in `.bss` unless
+  `SEGGER_RTT_SECTION` is set. On a core with a data cache they must be in
+  non-cacheable memory (or use `SEGGER_RTT_CPU_CACHE_LINE_SIZE` /
+  `SEGGER_RTT_UNCACHED_OFF`), since the probe reads RAM directly.
+
 ### Vendor module errors
 
 `FATAL_ERROR` when: `GIT_TAG` or `FAMILY` is missing, the call order is
 wrong (`st_fetch_cmsis_device()` before `arm_fetch_cmsis_core()`,
 `st_add_hal()` / `st_add_cmsis_startup()` / `freertos_add_kernel()` /
-`threadx_add_kernel()` / `threadx_add_<component>()` before the matching
-fetch), an unknown FreeRTOS or ThreadX port (the message lists the
+`threadx_add_kernel()` / `threadx_add_<component>()` / `segger_add_rtt()`
+before the matching fetch), a missing `SEGGER_RTT_Conf.h` in an RTT
+`CONFIG`, an unknown FreeRTOS or ThreadX port (the message lists the
 available ports), a component `KERNEL` that was not created by
 `threadx_add_kernel()`, an unknown NetX Duo addon or USBX part, USBX
 `PARTS network` without `NETX`, a FreeRTOS MPU port, an invalid `HEAP`, a
@@ -541,6 +578,14 @@ and `shared_mailbox.h`.
 | `.data` / `.bss` / stack | DTCM, `0x20000000`, 128K | D2 SRAM via CM4 alias, `0x10000000`, 288K |
 | Extra regions | ITCM, AXI SRAM (`.ram_d1`), D3 SRAM (`.shared_d3`) | D3 SRAM (`.shared_d3`) |
 | LED task (NUCLEO-H755ZI-Q) | LD1, PB0, 500 ms | LD2, PE1, 250 ms |
+| SEGGER RTT | `h755::rtt_cm7`, `_SEGGER_RTT` in DTCM (not cached) | `h755::rtt_cm4`, `_SEGGER_RTT` in D2 SRAM (CM4 has no cache) |
+
+- Both examples log over RTT channel 0 (`SEGGER_RTT_printf()`, default
+  configuration): a start line from `main()` and one line per blink, the
+  ThreadX CM7 image also a summary of the middleware demo. Each core has
+  its own control block; connect the J-Link to the core whose output you
+  want (one RTT session per core, e.g. device `STM32H755ZI_M7` / `_M4`).
+  `SEGGER_RTT_VERSION` in the examples selects the RTT tag.
 
 - D3 SRAM at `0x38000000` is shared. Both images place their `.shared_d3`
   section at the same address, so `shared_mailbox.h` is the layout contract
@@ -619,7 +664,7 @@ FreeRTOS example:
 | `SysTick_Handler` | `rtos_glue.cc` (HAL + FreeRTOS tick) | same |
 | `shared_mailbox` | `0x38000000` | `0x38000000` |
 | `crt0.o`, `malloc`, heap linked | no | no |
-| Flash used, Debug / MinSizeRel | 9260 B / 5332 B | 8632 B / 5176 B |
+| Flash used, Debug / MinSizeRel | 12068 B / 6996 B | 11448 B / 6840 B |
 
 - Each HAL library and each kernel is compiled once per core (8 objects
   each), with that core's CPU flags.
@@ -633,7 +678,7 @@ ThreadX example:
 | `malloc` linked | no | no |
 | Kernel | 192 objects, `cortex_m7`, `-mfpu=fpv5-d16` | 192 objects, `cortex_m4`, `-mfpu=fpv4-sp-d16` |
 | Middleware | FileX 212, LevelX 65, NetX Duo 511, USBX 447, GUIX 1315 objects, CM7 flags | none |
-| Flash used, Debug / MinSizeRel | 124264 B / 65740 B | 11292 B / 6356 B |
+| Flash used, Debug / MinSizeRel | 127160 B / 67468 B | 14104 B / 8016 B |
 | DTCM / RAM used, Debug | DTCM 117088 B of 128 KiB, AXI SRAM 128 KiB | RAM_D2 5744 B |
 
 The middleware symbols checked in the CM7 image: `_fx_media_format`,
@@ -697,6 +742,16 @@ uninitialized timer state. The example disables interrupts before
 `tx_kernel_enter()` and only forwards ticks to ThreadX after its low-level
 init has run.
 
+### `_write()` from a static library loses against libnosys
+
+The firmware's own libraries are scanned by the linker before libc and
+libnosys. A `_write()` in such a static library is not pulled in when its
+archive is scanned (nothing needs it yet); when newlib's `_write_r()` later
+asks for it, the linker takes the libnosys stub, and output silently goes
+nowhere. `segger_add_rtt(SYSCALLS)` adds `-Wl,--undefined=_write` so the RTT
+object is linked from the start. Verified in a test build: `_write` comes
+from `SEGGER_RTT_Syscalls_GCC.c`.
+
 ### Extra ~5 KB in Debug builds with GCC 15
 
 GCC 15 defines `_GLIBCXX_ASSERTIONS` for unoptimized (`-O0`) builds, so
@@ -724,6 +779,8 @@ the checks stay active in Debug, and a failure stops in the debugger.
   non-sparse path (full clone) is not exercised.
 - Defining the same chip twice is a `FATAL_ERROR`, also when two
   subprojects of one superbuild do it.
+- RTT output has not been watched on hardware yet (no probe in the loop);
+  symbols, placement and linking are verified.
 - Not covered yet: FreeRTOS MPU ports, FreeRTOS+ libraries (TCP, CLI, ...),
   ThreadX SMP / module ports, NetX Duo `azure_iot`, TSN and utilities.
 - The ThreadX middleware runs with RAM-backed drivers only. Real drivers

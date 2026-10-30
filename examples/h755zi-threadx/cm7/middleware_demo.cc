@@ -9,6 +9,7 @@
 #include "fx_api.h"
 #include "gx_api.h"
 #include "lx_api.h"
+#include "SEGGER_RTT.h"
 #include "nx_api.h"
 #include "ux_api.h"
 
@@ -199,6 +200,13 @@ void DemoThread(ULONG /*input*/) {
   middleware_demo_status.usbx_init = RunUsbxInit();
   middleware_demo_status.guix_init = RunGuixInit();
   middleware_demo_status.done = true;
+
+  SEGGER_RTT_printf(0,
+                    "cm7: middleware demo: filex=%u levelx=%u netx=%u usbx=%u guix=%u "
+                    "(0 = ok)\r\n",
+                    middleware_demo_status.filex_ram_disk, middleware_demo_status.levelx_nor_disk,
+                    middleware_demo_status.netx_ping, middleware_demo_status.usbx_init,
+                    middleware_demo_status.guix_init);
 }
 
 }  // namespace

@@ -11,7 +11,8 @@
 //   GUIX     system initialization (no display driver)
 //
 // Each field holds the status of its step (0 = success for all of them);
-// inspect middleware_demo_status in a debugger.
+// inspect middleware_demo_status in a debugger or read the summary line on
+// RTT channel 0.
 struct MiddlewareDemoStatus {
   UINT filex_ram_disk;
   UINT levelx_nor_disk;

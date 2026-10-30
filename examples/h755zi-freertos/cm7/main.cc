@@ -6,6 +6,7 @@
 #include <cstdint>
 
 #include "FreeRTOS.h"
+#include "SEGGER_RTT.h"
 #include "shared_mailbox.h"
 #include "stm32h7xx_hal.h"
 #include "task.h"
@@ -44,6 +45,7 @@ void BlinkTask(void* /*context*/) {
     frame_buffer[counter % frame_buffer.size()] = static_cast<std::uint8_t>(counter);
     shared_mailbox.cm7_counter = counter;
     HAL_GPIO_TogglePin(GPIOB, kLedPin);
+    SEGGER_RTT_printf(0, "cm7: blink %u\r\n", static_cast<unsigned>(counter));
     xTaskDelayUntil(&last_wake, kBlinkPeriod);
   }
 }
@@ -53,6 +55,8 @@ void BlinkTask(void* /*context*/) {
 int main() {
   HAL_Init();
   InitLed();
+  SEGGER_RTT_Init();
+  SEGGER_RTT_WriteString(0, "cm7: FreeRTOS start\r\n");
 
   xTaskCreateStatic(BlinkTask, "blink", blink_stack.size(), nullptr,
                     tskIDLE_PRIORITY + 1, blink_stack.data(), &blink_tcb);

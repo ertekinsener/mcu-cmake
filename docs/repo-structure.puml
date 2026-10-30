@@ -36,6 +36,9 @@ package "github.com/<you>/mcu-cmake (build infra)" as INFRA {
     [filex / levelx / netxduo /\nusbx / guix .cmake\nthreadx_add_<component>(KERNEL ...)] as V_TXMW
     [common.cmake\nshared helpers] as V_TXC
   }
+  package "cmake/vendors/segger" {
+    [rtt.cmake\nsegger_fetch_rtt()\nsegger_add_rtt()] as V_RTT
+  }
   package "cmake/vendors/<other> (future)" {
     [e.g. nxp/mcux_sdk.cmake,\nnordic/nrfx.cmake] as V_OTHER
   }
@@ -48,6 +51,7 @@ cloud "Upstream git (unmodified)" as UP {
   [FreeRTOS/FreeRTOS-Kernel] as U_RTOS
   [eclipse-threadx/threadx] as U_TX
   [eclipse-threadx/filex, levelx,\nnetxduo, usbx, guix] as U_TXMW
+  [SEGGERMicro/RTT] as U_RTT
 }
 
 package "github.com/<you>/firmware-xyz (application)" as APP {
@@ -77,6 +81,8 @@ V_TXMW ..> V_TXC
 V_TX ..> V_TXC
 I_PKG --> U_TX : git, sparse
 I_PKG --> U_TXMW : git, sparse
+V_RTT ..> I_PKG
+I_PKG --> U_RTT : git, sparse
 V_OTHER ..> I_PKG
 
 note bottom of APP

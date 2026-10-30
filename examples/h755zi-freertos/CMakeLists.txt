@@ -4,6 +4,7 @@ project(h755zi_freertos C CXX ASM)
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../../cmake")
 include(mcu)
 include(vendors/st/hal)
+include(vendors/segger/rtt)
 include(vendors/freertos/kernel)
 
 # Vendor package versions are chosen here, not in the module. Override on the
@@ -20,11 +21,15 @@ endif()
 if(NOT DEFINED FREERTOS_KERNEL_VERSION)
   set(FREERTOS_KERNEL_VERSION V11.3.2)
 endif()
+if(NOT DEFINED SEGGER_RTT_VERSION)
+  set(SEGGER_RTT_VERSION V8.58.0)
+endif()
 
 arm_fetch_cmsis_core(GIT_TAG ${CMSIS_CORE_VERSION})
 st_fetch_cmsis_device(FAMILY H7 GIT_TAG ${ST_CMSIS_DEVICE_H7_VERSION})
 st_fetch_hal(FAMILY H7 GIT_TAG ${ST_HAL_H7_VERSION})
 freertos_fetch_kernel(GIT_TAG ${FREERTOS_KERNEL_VERSION})
+segger_fetch_rtt(GIT_TAG ${SEGGER_RTT_VERSION})
 
 include("${CMAKE_CURRENT_SOURCE_DIR}/../common/stm32h755zi/stm32h755zi.cmake")
 
@@ -59,12 +64,17 @@ freertos_add_kernel(h755::rtos_cm7
   HEAP NONE
 )
 
+# RTT log channel 0; the control block lands in DTCM (.bss), which is not
+# cached, so the probe sees writes immediately.
+segger_add_rtt(h755::rtt_cm7 CHIP stm32::H755ZI::CM7 PRINTF)
+
 add_executable(firmware_cm7 cm7/main.cc common/rtos_glue.cc)
 target_compile_features(firmware_cm7 PRIVATE cxx_std_23)
 target_link_libraries(firmware_cm7 PRIVATE
   h755::startup_cm7
   h755::hal_cm7
   h755::rtos_cm7
+  h755::rtt_cm7
   h755::common
   mcu::cxx_bare_metal
   mcu::newlib_nano
@@ -99,12 +109,17 @@ freertos_add_kernel(h755::rtos_cm4
   HEAP NONE
 )
 
+# RTT log channel 0; the control block lands in D2 SRAM (.bss). The CM4 has
+# no data cache.
+segger_add_rtt(h755::rtt_cm4 CHIP stm32::H755ZI::CM4 PRINTF)
+
 add_executable(firmware_cm4 cm4/main.cc common/rtos_glue.cc)
 target_compile_features(firmware_cm4 PRIVATE cxx_std_23)
 target_link_libraries(firmware_cm4 PRIVATE
   h755::startup_cm4
   h755::hal_cm4
   h755::rtos_cm4
+  h755::rtt_cm4
   h755::common
   mcu::cxx_bare_metal
   mcu::newlib_nano

@@ -7,6 +7,7 @@
 #include <cstdint>
 
 #include "middleware_demo.h"
+#include "SEGGER_RTT.h"
 #include "shared_mailbox.h"
 #include "stm32h7xx_hal.h"
 #include "tx_api.h"
@@ -46,6 +47,7 @@ void BlinkThread(ULONG /*input*/) {
     frame_buffer[counter % frame_buffer.size()] = static_cast<std::uint8_t>(counter);
     shared_mailbox.cm7_counter = counter;
     HAL_GPIO_TogglePin(GPIOB, kLedPin);
+    SEGGER_RTT_printf(0, "cm7: blink %u\r\n", static_cast<unsigned>(counter));
     tx_thread_sleep(kBlinkPeriodTicks);
   }
 }
@@ -63,6 +65,8 @@ extern "C" void tx_application_define(void* /*first_unused_memory*/) {
 int main() {
   HAL_Init();
   InitLed();
+  SEGGER_RTT_Init();
+  SEGGER_RTT_WriteString(0, "cm7: ThreadX start\r\n");
 
   __disable_irq();  // see tx_glue.h
   tx_kernel_enter();
