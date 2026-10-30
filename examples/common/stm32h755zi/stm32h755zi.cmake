@@ -4,7 +4,7 @@
 #   include(${CMAKE_CURRENT_SOURCE_DIR}/../common/stm32h755zi/stm32h755zi.cmake)
 #
 # Defines:
-#   mcu::STM32H755ZI::CM7, mcu::STM32H755ZI::CM4   chip targets
+#   stm32::H755ZI::CM7, stm32::H755ZI::CM4   chip targets
 #   h755::hal_conf    INTERFACE, provides stm32h7xx_hal_conf.h
 #   h755::common      INTERFACE, shared headers (shared_mailbox.h)
 #   h755_startup      startup file name for st_add_cmsis_startup()
@@ -18,7 +18,7 @@
 #   CM4: flash bank 2, D2 SRAM1..3 through the CM4 alias at 0x10000000.
 #   Both: D3 SRAM4 as shared memory; both images must use the same layout
 #         there (see shared_mailbox.h).
-mcu_add_chip(STM32H755ZI
+mcu_add_chip(stm32::H755ZI::CM7
   FAMILY H7
   CORE CM7
   CPU cortex-m7
@@ -33,7 +33,7 @@ mcu_add_chip(STM32H755ZI
     SHARED_D3 xrw 0x38000000 64K
 )
 
-mcu_add_chip(STM32H755ZI
+mcu_add_chip(stm32::H755ZI::CM4
   FAMILY H7
   CORE CM4
   CPU cortex-m4

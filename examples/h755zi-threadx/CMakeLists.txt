@@ -53,18 +53,18 @@ target_include_directories(${threadx_conf_target} INTERFACE "${CMAKE_CURRENT_SOU
 # --- Cortex-M7 -------------------------------------------------------------
 
 st_add_hal(h755::hal_cm7
-  CHIP mcu::STM32H755ZI::CM7
+  CHIP stm32::H755ZI::CM7
   CONFIG h755::hal_conf
   MODULES GPIO HSEM PWR
 )
 st_add_cmsis_startup(h755::startup_cm7
-  CHIP mcu::STM32H755ZI::CM7
+  CHIP stm32::H755ZI::CM7
   STARTUP ${h755_startup}
   SYSTEM ${h755_system}
   HAL h755::hal_cm7
 )
 threadx_add_kernel(h755::rtos_cm7
-  CHIP mcu::STM32H755ZI::CM7
+  CHIP stm32::H755ZI::CM7
   PORT cortex_m7
   CONFIG h755::threadx_conf
 )
@@ -95,7 +95,7 @@ target_link_libraries(firmware_cm7 PRIVATE
   mcu::warnings
 )
 mcu_add_linker_script(firmware_cm7
-  CHIP mcu::STM32H755ZI::CM7
+  CHIP stm32::H755ZI::CM7
   FLASH_REGION FLASH
   RAM_REGION DTCMRAM
   STACK_SIZE 0x2000
@@ -106,18 +106,18 @@ mcu_add_firmware_outputs(firmware_cm7 BIN HEX MAP MEMORY_USAGE)
 # --- Cortex-M4 -------------------------------------------------------------
 
 st_add_hal(h755::hal_cm4
-  CHIP mcu::STM32H755ZI::CM4
+  CHIP stm32::H755ZI::CM4
   CONFIG h755::hal_conf
   MODULES GPIO HSEM PWR
 )
 st_add_cmsis_startup(h755::startup_cm4
-  CHIP mcu::STM32H755ZI::CM4
+  CHIP stm32::H755ZI::CM4
   STARTUP ${h755_startup}
   SYSTEM ${h755_system}
   HAL h755::hal_cm4
 )
 threadx_add_kernel(h755::rtos_cm4
-  CHIP mcu::STM32H755ZI::CM4
+  CHIP stm32::H755ZI::CM4
   PORT cortex_m4
   CONFIG h755::threadx_conf
 )
@@ -134,7 +134,7 @@ target_link_libraries(firmware_cm4 PRIVATE
   mcu::warnings
 )
 mcu_add_linker_script(firmware_cm4
-  CHIP mcu::STM32H755ZI::CM4
+  CHIP stm32::H755ZI::CM4
   FLASH_REGION FLASH
   RAM_REGION RAM_D2
   STACK_SIZE 0x1000

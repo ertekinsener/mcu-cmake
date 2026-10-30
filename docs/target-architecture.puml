@@ -51,8 +51,8 @@ package "Header-only targets" {
 }
 
 package "Chip targets" {
-  [mcu::STM32H755ZI::CM7\n-mcpu=cortex-m7 -mfpu=fpv5-d16\n-mfloat-abi=hard\nSTM32H755xx CORE_CM7\nFAMILY H7, MCU_MEMORY] as CM7CHIP
-  [mcu::STM32H755ZI::CM4\n-mcpu=cortex-m4 -mfpu=fpv4-sp-d16\nSTM32H755xx CORE_CM4] as CM4CHIP
+  [stm32::H755ZI::CM7\n-mcpu=cortex-m7 -mfpu=fpv5-d16\n-mfloat-abi=hard\nSTM32H755xx CORE_CM7\nFAMILY H7, MCU_MEMORY] as CM7CHIP
+  [stm32::H755ZI::CM4\n-mcpu=cortex-m4 -mfpu=fpv4-sp-d16\nSTM32H755xx CORE_CM4] as CM4CHIP
 }
 
 package "examples/common/stm32h755zi + examples/h755zi-freertos" {

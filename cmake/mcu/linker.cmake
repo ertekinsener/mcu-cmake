@@ -1,7 +1,7 @@
 # mcu_add_linker_script(): generate a linker script from a chip's memory map.
 #
 #   mcu_add_linker_script(<target>
-#     CHIP <chip target>        # e.g. mcu::H755ZI::CM7
+#     CHIP <chip target>        # e.g. stm32::H755ZI::CM7
 #     FLASH_REGION <region>     # code, read-only data, .data load image
 #     RAM_REGION <region>       # .data, .bss, heap and stack
 #     STACK_SIZE <bytes>        # minimum stack, e.g. 0x2000
@@ -107,7 +107,7 @@ function(mcu_add_linker_script target)
   # Variables consumed by the template.
   set(MCU_LD_TARGET "${target}")
   if(core)
-    set(MCU_LD_CHIP "${chip} ${core}")
+    set(MCU_LD_CHIP "${chip}, core ${core}")
   else()
     set(MCU_LD_CHIP "${chip}")
   endif()

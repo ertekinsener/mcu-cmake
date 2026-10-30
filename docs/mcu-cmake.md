@@ -70,7 +70,7 @@ arm_fetch_cmsis_core(GIT_TAG v6.1.0)
 st_fetch_cmsis_device(FAMILY H7 GIT_TAG v1.10.7)
 st_fetch_hal(FAMILY H7 GIT_TAG v1.11.6)
 
-mcu_add_chip(STM32H755ZI
+mcu_add_chip(stm32::H755ZI::CM7
   FAMILY H7
   CORE CM7
   CPU cortex-m7
@@ -90,12 +90,12 @@ mcu_add_named_library(board::hal_conf INTERFACE hal_conf_target)
 target_include_directories(${hal_conf_target} INTERFACE config)
 
 st_add_hal(board::hal_cm7
-  CHIP mcu::STM32H755ZI::CM7
+  CHIP stm32::H755ZI::CM7
   CONFIG board::hal_conf
   MODULES GPIO PWR
 )
 st_add_cmsis_startup(board::startup_cm7
-  CHIP mcu::STM32H755ZI::CM7
+  CHIP stm32::H755ZI::CM7
   STARTUP startup_stm32h755xx.s
   SYSTEM system_stm32h7xx_dualcore_boot_cm4_cm7.c
   HAL board::hal_cm7
@@ -110,7 +110,7 @@ target_link_libraries(firmware_cm7 PRIVATE
   mcu::warnings
 )
 mcu_add_linker_script(firmware_cm7
-  CHIP mcu::STM32H755ZI::CM7
+  CHIP stm32::H755ZI::CM7
   FLASH_REGION FLASH
   RAM_REGION DTCMRAM
   STACK_SIZE 0x2000
@@ -147,8 +147,14 @@ express project-specific parameters such as the config header, port, heap
 or two configurations on one core. Here every library is a real STATIC (or
 OBJECT) target, built once, with a name the project chooses.
 
-Fixed, parameter-free targets do use fixed namespaces: `mcu::<chip>`,
-`mcu::warnings`, `arm::cmsis_core`, `st::cmsis_device::<family>`.
+Chip targets follow the same rule: `mcu_add_chip(stm32::H755ZI::CM7 ...)`.
+The core is vendor-neutral, so it does not impose a vendor prefix; functions
+that take a `CHIP` check its properties, not its name. Only targets that
+exist once and take no project parameters use fixed namespaces:
+`mcu::warnings`, `mcu::cxx_bare_metal`, `mcu::newlib_nano`,
+`arm::cmsis_core`, `st::cmsis_device::<family>`. Lower-case namespaces are
+used throughout; `st::` is taken by the ST package targets, so the examples
+use `stm32::` for chips and `h755::` for project libraries.
 
 ```
 mcu_add_named_library(<name> <STATIC|OBJECT|INTERFACE> <out_var> [<source>...])
@@ -166,7 +172,7 @@ accept aliases.
 ### `mcu_add_chip()`
 
 ```
-mcu_add_chip(<chip>
+mcu_add_chip(<name>
   [ARCH <arch>]
   [FAMILY <family>]
   [CORE <core>]
@@ -177,8 +183,11 @@ mcu_add_chip(<chip>
   MEMORY <name> <attributes> <origin> <length> [...])
 ```
 
-- Creates the INTERFACE target `mcu::<chip>`, or `mcu::<chip>::<core>`
-  when `CORE` is given. A dual-core part gets one call per core.
+- Creates the INTERFACE target `<name>`, chosen by the project and
+  optionally namespaced (`stm32::H755ZI::CM7`, see
+  [Target naming](#target-naming)). A dual-core part gets one chip target
+  per core. `CORE` is informational (shown in the generated linker script
+  header).
 - `ARCH` selects the flag handler `_mcu_arch_<arch>_flags()` in
   [arch/](../cmake/mcu/arch); default and currently only handler: `arm`
   (Cortex-M). For `arm`, `CPU` is the `-mcpu` value (must be a Cortex-M
@@ -196,8 +205,8 @@ mcu_add_chip(<chip>
 `FATAL_ERROR` when: unsupported `ARCH`, missing or non-Cortex-M `CPU`,
 `FLOAT_ABI` `hard` / `softfp` without `FPU`, `MEMORY` empty or not a
 multiple of 4 values, invalid region name / attributes / length, non-hex
-origin, duplicate or overlapping regions, `FAMILY` not upper case, chip
-(and core) defined twice.
+origin, duplicate or overlapping regions, `FAMILY` not upper case, invalid
+name, or a name (or its real target name) that already exists.
 
 ### `mcu_add_linker_script()`
 
@@ -523,7 +532,7 @@ and `shared_mailbox.h`.
 
 | | CM7 | CM4 |
 |---|---|---|
-| Chip target | `mcu::STM32H755ZI::CM7` | `mcu::STM32H755ZI::CM4` |
+| Chip target | `stm32::H755ZI::CM7` | `stm32::H755ZI::CM4` |
 | CPU flags | `cortex-m7`, `fpv5-d16`, hard | `cortex-m4`, `fpv4-sp-d16`, hard |
 | HAL library | `hal_cm7` (GPIO, HSEM, PWR + CORTEX, RCC) | `hal_cm4` (same modules) |
 | RTOS kernel | FreeRTOS `rtos_cm7`, port `ARM_CM4F`, `HEAP NONE`; ThreadX `rtos_cm7`, port `cortex_m7` | FreeRTOS `rtos_cm4`, port `ARM_CM4F`, `HEAP NONE`; ThreadX `rtos_cm4`, port `cortex_m4` |

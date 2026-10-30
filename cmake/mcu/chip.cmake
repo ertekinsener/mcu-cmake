@@ -3,11 +3,13 @@
 # There is no built-in device database. The caller passes the values from the
 # datasheet / reference manual, and every value is validated.
 #
-#   mcu_add_chip(<chip>
+#   mcu_add_chip(<name>                  # chosen by the project, may be
+#                                        # namespaced, e.g. stm32::H755ZI::CM7
 #     [ARCH <arch>]                      # CPU architecture, default: arm
 #     [FAMILY <family>]                  # vendor family, e.g. H7; used by
 #                                        # vendor modules (st_add_hal(), ...)
-#     [CORE <core>]                      # e.g. CM7, CM4 for dual-core parts
+#     [CORE <core>]                      # informational, e.g. CM7 (shown in
+#                                        # the generated linker script)
 #     CPU <cpu>                          # arm: -mcpu value, e.g. cortex-m7
 #     [FPU <fpu>]                        # arm: -mfpu value, e.g. fpv5-d16
 #     [FLOAT_ABI <soft|softfp|hard>]     # arm: default hard with FPU
@@ -15,9 +17,11 @@
 #     MEMORY <name> <attributes> <origin> <length>
 #            [<name> <attributes> <origin> <length>...])
 #
-# Creates the INTERFACE target mcu::<chip> or mcu::<chip>::<core> that
-# carries the CPU flags, definitions and memory map. Link firmware to it and
-# call mcu_add_linker_script() with the same target.
+# Creates the INTERFACE target <name> (an ALIAS of a real target when
+# namespaced, see naming.cmake) that carries the CPU flags, definitions and
+# memory map. Link firmware to it and call mcu_add_linker_script() with the
+# same target. A dual-core part gets one chip target per core. Functions that
+# take a CHIP check its properties, not its name.
 #
 # CPU, FPU and FLOAT_ABI are interpreted by the architecture handler
 # _mcu_arch_<arch>_flags() (see arch/). Supporting another architecture
@@ -105,32 +109,18 @@ function(_mcu_validate_memory context memory)
   endforeach()
 endfunction()
 
-function(mcu_add_chip chip)
+function(mcu_add_chip name)
   cmake_parse_arguments(PARSE_ARGV 1 arg "" "ARCH;FAMILY;CORE;CPU;FPU;FLOAT_ABI" "DEFINITIONS;MEMORY")
-
-  if(arg_CORE)
-    set(alias_name "mcu::${chip}::${arg_CORE}")
-    set(target_name "mcu_${chip}_${arg_CORE}")
-  else()
-    set(alias_name "mcu::${chip}")
-    set(target_name "mcu_${chip}")
-  endif()
-  set(context "mcu_add_chip(${alias_name})")
+  set(context "mcu_add_chip(${name})")
 
   if(arg_UNPARSED_ARGUMENTS)
     message(FATAL_ERROR "${context}: unexpected arguments: ${arg_UNPARSED_ARGUMENTS}")
-  endif()
-  if(NOT chip MATCHES "^[A-Za-z0-9]+$")
-    message(FATAL_ERROR "${context}: chip name must be alphanumeric, e.g. STM32H755ZI")
   endif()
   if(arg_FAMILY AND NOT arg_FAMILY MATCHES "^[A-Z][A-Z0-9]+$")
     message(FATAL_ERROR "${context}: FAMILY must be upper case, e.g. H7")
   endif()
   if(arg_CORE AND NOT arg_CORE MATCHES "^[A-Za-z0-9]+$")
     message(FATAL_ERROR "${context}: core name must be alphanumeric, e.g. CM7")
-  endif()
-  if(TARGET ${target_name})
-    message(FATAL_ERROR "${context}: already defined")
   endif()
   if(NOT arg_ARCH)
     set(arg_ARCH arm)
@@ -143,8 +133,7 @@ function(mcu_add_chip chip)
 
   _mcu_validate_memory("${context}" "${arg_MEMORY}")
 
-  add_library(${target_name} INTERFACE)
-  add_library(${alias_name} ALIAS ${target_name})
+  mcu_add_named_library(${name} INTERFACE target_name)
 
   # CPU flags must reach the linker too, so it picks the matching multilib.
   target_compile_options(${target_name} INTERFACE
@@ -159,7 +148,7 @@ function(mcu_add_chip chip)
   target_compile_definitions(${target_name} INTERFACE ${arg_DEFINITIONS})
 
   set_target_properties(${target_name} PROPERTIES
-    MCU_CHIP "${chip}"
+    MCU_CHIP "${name}"
     MCU_ARCH "${arg_ARCH}"
     MCU_FAMILY "${arg_FAMILY}"
     MCU_CORE "${arg_CORE}"
