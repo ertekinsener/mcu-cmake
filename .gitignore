@@ -1,0 +1,5 @@
+# Build trees (CMake presets use <example>/build/<preset>)
+build/
+
+# Upstream ObKo/stm32-cmake copy, kept only as a reference
+/stm32-cmake/

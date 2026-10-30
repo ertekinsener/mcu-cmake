@@ -1,0 +1,47 @@
+@startuml repo-structure
+' Proposed repository layout: one build-infra repo, vendor code pulled
+' from upstream by pinned tag via FetchContent (no forks unless patched).
+
+title Proposed repository / dependency structure
+
+skinparam componentStyle rectangle
+skinparam packageStyle folder
+
+cloud "Upstream (unmodified, pinned tags)" as UP {
+  [ARM-software/CMSIS_6\n(CMSIS core headers)] as U_CMSIS
+  [STMicroelectronics/cmsis-device-h7] as U_DEV
+  [STMicroelectronics/stm32h7xx-hal-driver] as U_HAL
+  [FreeRTOS/FreeRTOS-Kernel\n(has its own CMakeLists)] as U_RTOS
+}
+
+package "github.com/<you>/stm32-cmake (build infra)" as INFRA {
+  [cmake/toolchain/arm-none-eabi-gcc.cmake] as I_TC
+  [cmake/stm32/chip.cmake\nstm32_add_chip(...)\nno device database] as I_CHIPS
+  [cmake/stm32/linker/default.ld.in] as I_LD
+  [cmake/vendor/cmsis.cmake\ncmake/vendor/stm32_hal.cmake\ncmake/vendor/freertos.cmake\n(planned)] as I_VENDOR
+  [cmake/stm32Config.cmake\n(package config)] as I_CFG
+}
+
+package "github.com/<you>/firmware-xyz (application)" as APP {
+  [CMakeLists.txt\nFetchContent(stm32-cmake)\nstm32_add_chip(H755ZI CORE CM7/CM4 ...)] as A_CML
+  [CMakePresets.json] as A_PRESETS
+  [config/stm32h7xx_hal_conf.h\nconfig/FreeRTOSConfig.h] as A_CONF
+  [src/*.cc] as A_SRC
+}
+
+A_CML --> INFRA : FetchContent / find_package(stm32 CONFIG)
+A_PRESETS ..> I_TC : toolchainFile
+I_VENDOR --> U_CMSIS : FetchContent GIT_TAG <pinned>
+I_VENDOR --> U_DEV : FetchContent GIT_TAG <pinned>
+I_VENDOR --> U_HAL : FetchContent GIT_TAG <pinned>
+I_VENDOR --> U_RTOS : add_subdirectory (native CMake)
+I_CFG ..> I_CHIPS
+I_CFG ..> I_VENDOR
+
+note bottom of UP
+  Fork a vendor repo only if you must patch it.
+  Otherwise keep the wrapper logic (CMake) in the
+  infra repo and reference upstream by tag.
+end note
+
+@enduml

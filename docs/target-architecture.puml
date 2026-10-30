@@ -1,0 +1,76 @@
+@startuml target-architecture
+' CMake target graph of the in-house STM32 support module, shown for the
+' STM32H755ZI dual-core example. Arrows mean target_link_libraries
+' (consumer --> dependency); dotted arrows are function calls.
+
+title CMake target architecture (STM32H755ZI dual core)
+
+skinparam componentStyle rectangle
+skinparam packageStyle rectangle
+skinparam defaultTextAlignment center
+
+package "cmake/toolchain" {
+  [arm-none-eabi-gcc.cmake\nCMAKE_SYSTEM_NAME Generic\nfinds gcc / g++ / objcopy / size\nno CPU flags] as TOOLCHAIN
+}
+
+package "cmake/stm32 (support module)" {
+  [stm32_add_chip()\nvalues from datasheet,\nvalidated, no database] as ADDCHIP
+  [stm32_add_linker_script()\nconfigure_file(default.ld.in)] as ADDLD
+  [stm32_add_firmware_outputs()\nBIN HEX MAP MEMORY_USAGE SIZE] as OUTPUTS
+  [stm32::cxx_bare_metal\n$<$<COMPILE_LANGUAGE:CXX>:\n-fno-exceptions -fno-rtti ...>] as CXX
+  [stm32::newlib_nano\n--specs=nano.specs\n--specs=nosys.specs] as NANO
+  [stm32::warnings\n-Wall -Wextra -Wshadow\n-Wdouble-promotion ...] as WARN
+}
+
+package "Chip targets (created by the project)" {
+  [stm32::H755ZI::CM7\n-mcpu=cortex-m7 -mfpu=fpv5-d16\n-mfloat-abi=hard\nSTM32H755xx CORE_CM7\nSTM32_MEMORY property] as CM7CHIP
+  [stm32::H755ZI::CM4\n-mcpu=cortex-m4 -mfpu=fpv4-sp-d16\n-mfloat-abi=hard\nSTM32H755xx CORE_CM4\nSTM32_MEMORY property] as CM4CHIP
+}
+
+package "examples/h755zi-dual-core" {
+  [example_startup (INTERFACE)\nstartup.cc, -nostartfiles\ncompiled once per core] as STARTUP
+  [firmware_cm7.elf\nFLASH 0x08000000, DTCM\n.ram_d1, .shared_d3] as FW7
+  [firmware_cm4.elf\nFLASH 0x08100000, RAM_D2\n.shared_d3] as FW4
+  [firmware_cm7.ld] as LD7
+  [firmware_cm4.ld] as LD4
+}
+
+ADDCHIP ..> CM7CHIP : creates
+ADDCHIP ..> CM4CHIP : creates
+
+FW7 --> CM7CHIP
+FW7 --> STARTUP
+FW7 --> CXX
+FW7 --> NANO
+FW7 --> WARN
+
+FW4 --> CM4CHIP
+FW4 --> STARTUP
+FW4 --> CXX
+FW4 --> NANO
+FW4 --> WARN
+
+ADDLD ..> CM7CHIP : reads STM32_MEMORY
+ADDLD ..> CM4CHIP : reads STM32_MEMORY
+ADDLD ..> LD7 : generates
+ADDLD ..> LD4 : generates
+LD7 ..> FW7 : -T, LINK_DEPENDS
+LD4 ..> FW4 : -T, LINK_DEPENDS
+OUTPUTS ..> FW7 : post-build
+OUTPUTS ..> FW4 : post-build
+
+TOOLCHAIN -[hidden]down- ADDCHIP
+
+note bottom of ADDCHIP
+  FATAL_ERROR on: missing CPU, bad MEMORY tuple,
+  non-hex origin, duplicate or overlapping regions,
+  FLOAT_ABI without FPU, chip defined twice.
+end note
+
+note bottom of ADDLD
+  FATAL_ERROR on: unknown chip target,
+  FLASH_REGION / RAM_REGION not in the memory map.
+  Extra writable regions -> NOLOAD .<region> sections.
+end note
+
+@enduml
