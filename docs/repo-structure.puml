@@ -16,7 +16,8 @@ package "github.com/<you>/mcu-cmake (build infra)" as INFRA {
     [chip.cmake\nmcu_add_chip()] as I_CHIP
     [arch/arm.cmake\nCortex-M flags] as I_ARCH
     [linker.cmake + linker/default.ld.in] as I_LD
-    [package.cmake\nmcu_fetch_package()\ngit, no pinned versions] as I_PKG
+    [package.cmake\nmcu_fetch_package()\ngit, sparse, no pinned versions] as I_PKG
+    [naming.cmake\nmcu_add_named_library()\nns::name -> ALIAS] as I_NAME
     [runtime.cmake + runtime/] as I_RT
     [outputs.cmake, support_targets.cmake] as I_MISC
   }
@@ -30,6 +31,11 @@ package "github.com/<you>/mcu-cmake (build infra)" as INFRA {
   package "cmake/vendors/freertos" {
     [kernel.cmake\nfreertos_fetch_kernel()\nfreertos_add_kernel()] as V_RTOS
   }
+  package "cmake/vendors/threadx" {
+    [kernel.cmake\nthreadx_fetch_kernel()\nthreadx_add_kernel()] as V_TX
+    [filex / levelx / netxduo /\nusbx / guix .cmake\nthreadx_add_<component>(KERNEL ...)] as V_TXMW
+    [common.cmake\nshared helpers] as V_TXC
+  }
   package "cmake/vendors/<other> (future)" {
     [e.g. nxp/mcux_sdk.cmake,\nnordic/nrfx.cmake] as V_OTHER
   }
@@ -40,12 +46,14 @@ cloud "Upstream git (unmodified)" as UP {
   [STMicroelectronics/cmsis-device-<family>] as U_DEV
   [STMicroelectronics/stm32<family>xx-hal-driver] as U_HAL
   [FreeRTOS/FreeRTOS-Kernel] as U_RTOS
+  [eclipse-threadx/threadx] as U_TX
+  [eclipse-threadx/filex, levelx,\nnetxduo, usbx, guix] as U_TXMW
 }
 
 package "github.com/<you>/firmware-xyz (application)" as APP {
   [CMakeLists.txt\nversions (GIT_TAG)\nmcu_add_chip(...)] as A_CML
   [CMakePresets.json] as A_PRESETS
-  [config/stm32<family>xx_hal_conf.h\nconfig/FreeRTOSConfig.h] as A_CONF
+  [config/stm32<family>xx_hal_conf.h\nconfig/FreeRTOSConfig.h or tx_user.h] as A_CONF
   [src/*.cc] as A_SRC
 }
 
@@ -58,11 +66,17 @@ V_HAL ..> I_PKG
 V_DEV ..> I_RT
 V_DEV --> V_CORE
 V_HAL --> V_DEV
-I_PKG --> U_CORE : git, shallow
-I_PKG --> U_DEV : git, shallow
-I_PKG --> U_HAL : git, shallow
+I_PKG --> U_CORE : git, sparse
+I_PKG --> U_DEV : git, sparse
+I_PKG --> U_HAL : git, sparse
 V_RTOS ..> I_PKG
-I_PKG --> U_RTOS : git, shallow
+I_PKG --> U_RTOS : git, sparse
+V_TX ..> I_PKG
+V_TXMW ..> V_TX : KERNEL
+V_TXMW ..> V_TXC
+V_TX ..> V_TXC
+I_PKG --> U_TX : git, sparse
+I_PKG --> U_TXMW : git, sparse
 V_OTHER ..> I_PKG
 
 note bottom of APP

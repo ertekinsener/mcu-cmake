@@ -6,7 +6,7 @@
 #     GIT_TAG <tag|commit>          # chosen by the project, e.g. V11.3.2
 #     [GIT_REPOSITORY <url>])       # default: FreeRTOS/FreeRTOS-Kernel
 #
-#   freertos_add_kernel(<name>
+#   freertos_add_kernel(<name>      # may be namespaced, e.g. board::rtos_cm7
 #     CHIP <chip target>            # provides the CPU flags
 #     CONFIG <target>               # provides FreeRTOSConfig.h
 #     PORT <port>                   # directory under portable/GCC, e.g.
@@ -47,6 +47,8 @@ function(freertos_fetch_kernel)
   mcu_fetch_package(freertos_kernel
     GIT_REPOSITORY ${arg_GIT_REPOSITORY}
     GIT_TAG ${arg_GIT_TAG}
+    # Kernel sources are top-level files, always part of a sparse checkout.
+    SPARSE_PATHS include portable
     OUT_SOURCE_DIR source_dir
   )
   if(NOT EXISTS "${source_dir}/tasks.c" OR NOT EXISTS "${source_dir}/include/FreeRTOS.h")
@@ -125,11 +127,11 @@ function(freertos_add_kernel name)
     list(APPEND sources "${kernel_dir}/portable/MemMang/heap_${arg_HEAP}.c")
   endif()
 
-  add_library(${name} STATIC ${sources})
+  mcu_add_named_library(${name} STATIC target ${sources})
   # SYSTEM: kernel headers do not trigger the project's warning set.
-  target_include_directories(${name} SYSTEM PUBLIC
+  target_include_directories(${target} SYSTEM PUBLIC
     "${kernel_dir}/include"
     "${port_dir}"
   )
-  target_link_libraries(${name} PUBLIC ${arg_CHIP} ${arg_CONFIG})
+  target_link_libraries(${target} PUBLIC ${arg_CHIP} ${arg_CONFIG})
 endfunction()

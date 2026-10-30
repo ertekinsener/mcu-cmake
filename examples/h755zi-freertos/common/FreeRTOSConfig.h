@@ -1,5 +1,5 @@
-#ifndef EXAMPLES_H755ZI_DUAL_CORE_COMMON_FREERTOSCONFIG_H_
-#define EXAMPLES_H755ZI_DUAL_CORE_COMMON_FREERTOSCONFIG_H_
+#ifndef EXAMPLES_H755ZI_FREERTOS_COMMON_FREERTOSCONFIG_H_
+#define EXAMPLES_H755ZI_FREERTOS_COMMON_FREERTOSCONFIG_H_
 
 // FreeRTOS configuration shared by both cores. Each core runs its own kernel
 // instance; core-specific values (clock) come from the core's own
@@ -83,4 +83,4 @@ extern uint32_t SystemCoreClock;
 #define vPortSVCHandler     SVC_Handler
 #define xPortPendSVHandler  PendSV_Handler
 
-#endif  // EXAMPLES_H755ZI_DUAL_CORE_COMMON_FREERTOSCONFIG_H_
+#endif  // EXAMPLES_H755ZI_FREERTOS_COMMON_FREERTOSCONFIG_H_

@@ -1,10 +1,15 @@
 @startuml target-architecture
 ' CMake target graph of mcu-cmake, shown for the
-' STM32H755ZI dual-core example (CM4 side mirrors CM7 and is collapsed).
+' STM32H755ZI FreeRTOS example (CM4 side mirrors CM7 and is collapsed).
+' The ThreadX example has the same structure with threadx_add_kernel()
+' (port cortex_m7 / cortex_m4) and tx_user.h instead of FreeRTOSConfig.h;
+' its CM7 image adds h755::filex_cm7, levelx_cm7, netx_cm7, usbx_cm7 and
+' guix_cm7, each linked to h755::rtos_cm7 (KERNEL).
+' Project libraries use namespaced aliases (h755::hal_cm7 -> h755_hal_cm7).
 ' Solid arrows: target_link_libraries (consumer --> dependency).
 ' Dotted arrows: function calls / generated files.
 
-title CMake target architecture (STM32H755ZI dual core)
+title CMake target architecture (STM32H755ZI dual core, FreeRTOS)
 
 skinparam componentStyle rectangle
 skinparam packageStyle rectangle
@@ -25,11 +30,12 @@ package "cmake/mcu (vendor-neutral core)" {
   [mcu::warnings] as WARN
 }
 
-package "cmake/vendors/arm + st + freertos" {
+package "cmake/vendors/arm + st + freertos + threadx" {
   [arm_fetch_cmsis_core()] as FETCHCORE
   [st_fetch_cmsis_device()\nst_add_cmsis_startup()] as ADDSTARTUP
   [st_fetch_hal()\nst_add_hal()] as ADDHAL
   [freertos_fetch_kernel()\nfreertos_add_kernel()] as ADDRTOS
+  [threadx_fetch_kernel()\nthreadx_add_kernel()] as ADDTX
 }
 
 cloud "Upstream git\n(tags chosen in the example)" {
@@ -49,12 +55,12 @@ package "Chip targets" {
   [mcu::STM32H755ZI::CM4\n-mcpu=cortex-m4 -mfpu=fpv4-sp-d16\nSTM32H755xx CORE_CM4] as CM4CHIP
 }
 
-package "examples/h755zi-dual-core" {
-  [h755_hal_conf (INTERFACE)\nstm32h7xx_hal_conf.h] as HALCONF
-  [h755_freertos_conf (INTERFACE)\nFreeRTOSConfig.h] as RTOSCONF
-  [hal_cm7 (STATIC)\nhal, cortex, rcc, gpio,\nhsem, pwr (+ _ex)] as HAL7
-  [rtos_cm7 (STATIC)\nkernel, port ARM_CM4F,\nHEAP NONE] as RTOS7
-  [startup_cm7 (OBJECT)\nstartup_stm32h755xx.s\nsystem_..._dualcore_boot_cm4_cm7.c] as START7
+package "examples/common/stm32h755zi + examples/h755zi-freertos" {
+  [h755::hal_conf (INTERFACE)\nstm32h7xx_hal_conf.h] as HALCONF
+  [h755::freertos_conf (INTERFACE)\nFreeRTOSConfig.h] as RTOSCONF
+  [h755::hal_cm7 (STATIC)\nhal, cortex, rcc, gpio,\nhsem, pwr (+ _ex)] as HAL7
+  [h755::rtos_cm7 (STATIC)\nkernel, port ARM_CM4F,\nHEAP NONE] as RTOS7
+  [h755::startup_cm7 (OBJECT)\nstartup_stm32h755xx.s\nsystem_..._dualcore_boot_cm4_cm7.c] as START7
   [firmware_cm7.elf] as FW7
   [firmware_cm7.ld] as LD7
   [hal_cm4 / rtos_cm4 / startup_cm4 /\nfirmware_cm4.elf\n(same structure)] as CM4SIDE
@@ -65,6 +71,7 @@ ADDCHIP ..> CM4CHIP : creates
 ADDHAL ..> HAL7 : creates
 ADDSTARTUP ..> START7 : creates
 FETCHCORE ..> FETCH
+ADDTX ..> FETCH
 ADDSTARTUP ..> FETCH
 ADDHAL ..> FETCH
 ADDRTOS ..> FETCH

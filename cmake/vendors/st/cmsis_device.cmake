@@ -10,7 +10,7 @@
 # Creates the header-only target st::cmsis_device::<family>, linked to
 # arm::cmsis_core (call arm_fetch_cmsis_core() first).
 #
-#   st_add_cmsis_startup(<name>
+#   st_add_cmsis_startup(<name>     # may be namespaced, e.g. board::startup_cm7
 #     CHIP <chip target>            # chip with FAMILY set
 #     STARTUP <file>                # name in Source/Templates/gcc or a path
 #     SYSTEM <file>                 # name in Source/Templates or a path
@@ -61,6 +61,7 @@ function(st_fetch_cmsis_device)
   mcu_fetch_package(st_cmsis_device_${family_l}
     GIT_REPOSITORY ${arg_GIT_REPOSITORY}
     GIT_TAG ${arg_GIT_TAG}
+    SPARSE_PATHS Include Source
     OUT_SOURCE_DIR source_dir
   )
   if(TARGET st_cmsis_device_${family_l})
@@ -124,11 +125,11 @@ function(st_add_cmsis_startup name)
     message(FATAL_ERROR "${context}: system file not found: ${system}. Available: ${available}")
   endif()
 
-  add_library(${name} OBJECT "${startup}" "${system}")
-  target_link_libraries(${name} PUBLIC ${arg_CHIP} st::cmsis_device::${family})
+  mcu_add_named_library(${name} OBJECT target "${startup}" "${system}")
+  target_link_libraries(${target} PUBLIC ${arg_CHIP} st::cmsis_device::${family})
   if(arg_HAL)
     # system_*.c includes the HAL config (HSE_VALUE, ...) through USE_HAL_DRIVER.
-    target_link_libraries(${name} PUBLIC ${arg_HAL})
+    target_link_libraries(${target} PUBLIC ${arg_HAL})
   endif()
-  mcu_target_add_runtime(${name})
+  mcu_target_add_runtime(${target})
 endfunction()

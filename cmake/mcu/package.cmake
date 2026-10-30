@@ -4,10 +4,16 @@
 #   mcu_fetch_package(<name>
 #     GIT_REPOSITORY <url>
 #     GIT_TAG <tag|commit>
+#     [SPARSE_PATHS <dir>...]
 #     [OUT_SOURCE_DIR <var>])
 #
-# - Tags and branches are cloned shallow; a full 40-character commit hash
-#   needs a full clone (git cannot shallow-fetch an arbitrary commit).
+# - Without SPARSE_PATHS: tags and branches are cloned shallow; a full
+#   40-character commit hash needs a full clone.
+# - With SPARSE_PATHS: only <ref> is fetched (depth 1, also for commit
+#   hashes on GitHub/GitLab) as a partial clone with a cone-mode sparse
+#   checkout of the listed directories (plus top-level files). Vendor modules
+#   use it to skip tests, docs and tools; e.g. GUIX drops from >300 MB to
+#   about 20 MB.
 # - The package is only downloaded, never added with add_subdirectory(), so
 #   repositories with their own CMakeLists.txt do not inject targets.
 # - Fetching the same <name> again with the same repository and tag is a
@@ -23,7 +29,7 @@ include_guard(GLOBAL)
 include(FetchContent)
 
 function(mcu_fetch_package name)
-  cmake_parse_arguments(PARSE_ARGV 1 arg "" "GIT_REPOSITORY;GIT_TAG;OUT_SOURCE_DIR" "")
+  cmake_parse_arguments(PARSE_ARGV 1 arg "" "GIT_REPOSITORY;GIT_TAG;OUT_SOURCE_DIR" "SPARSE_PATHS")
   set(context "mcu_fetch_package(${name})")
 
   if(arg_UNPARSED_ARGUMENTS)
@@ -47,6 +53,28 @@ function(mcu_fetch_package name)
         "${context}: already fetched as ${prev_repo} @ ${prev_tag}, "
         "now requested as ${arg_GIT_REPOSITORY} @ ${arg_GIT_TAG}")
     endif()
+  elseif(arg_SPARSE_PATHS)
+    foreach(path IN LISTS arg_SPARSE_PATHS)
+      if(NOT path MATCHES "^[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)*$")
+        message(FATAL_ERROR "${context}: invalid SPARSE_PATHS entry '${path}'")
+      endif()
+    endforeach()
+    find_package(Git REQUIRED)
+    get_property(module_dir GLOBAL PROPERTY MCU_MODULE_DIR)
+    string(REPLACE ";" "," paths "${arg_SPARSE_PATHS}")
+
+    FetchContent_Declare(${name}
+      DOWNLOAD_COMMAND "${CMAKE_COMMAND}"
+        "-DREPOSITORY=${arg_GIT_REPOSITORY}"
+        "-DREF=${arg_GIT_TAG}"
+        "-DPATHS=${paths}"
+        "-DDIR=<SOURCE_DIR>"
+        "-DGIT=${GIT_EXECUTABLE}"
+        -P "${module_dir}/git_sparse_fetch.cmake"
+      # Points at a directory without CMakeLists.txt, so MakeAvailable only
+      # populates the sources.
+      SOURCE_SUBDIR mcu-cmake-populate-only
+    )
   else()
     if(arg_GIT_TAG MATCHES "^[0-9a-f]{40}$")
       set(shallow FALSE)
@@ -64,6 +92,9 @@ function(mcu_fetch_package name)
       # populates the sources.
       SOURCE_SUBDIR mcu-cmake-populate-only
     )
+  endif()
+
+  if(NOT fetched)
     message(STATUS "mcu: fetching ${name} (${arg_GIT_TAG})")
     FetchContent_MakeAvailable(${name})
     FetchContent_GetProperties(${name} SOURCE_DIR source_dir)

@@ -19,6 +19,7 @@ function(mcu_add_firmware_outputs target)
   if(NOT TARGET ${target})
     message(FATAL_ERROR "${context}: ${target} is not a target")
   endif()
+  mcu_resolve_target(${target} target)
 
   set(elf "$<TARGET_FILE:${target}>")
   set(base "$<TARGET_FILE_DIR:${target}>/$<TARGET_FILE_BASE_NAME:${target}>")

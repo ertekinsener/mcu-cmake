@@ -26,6 +26,7 @@ endif()
 # global properties instead of variables.
 set_property(GLOBAL PROPERTY MCU_MODULE_DIR "${CMAKE_CURRENT_LIST_DIR}/mcu")
 
+include("${CMAKE_CURRENT_LIST_DIR}/mcu/naming.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/mcu/arch/arm.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/mcu/chip.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/mcu/linker.cmake")

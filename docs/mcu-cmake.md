@@ -1,7 +1,7 @@
 # mcu-cmake
 
 A small, target-based CMake module for bare-metal MCU firmware. The core is
-vendor-neutral; vendor packages (CMSIS, HAL, FreeRTOS, ...) live in separate modules,
+vendor-neutral; vendor packages (CMSIS, HAL, FreeRTOS, ThreadX, ...) live in separate modules,
 one file per package, and are fetched from upstream git at versions chosen by
 the project.
 
@@ -12,8 +12,9 @@ the project.
 - Changing the MCU model or vendor changes the chip description and the
   vendor modules in the project, not the core.
 
-Exercised with the STM32H755ZI (dual core, Cortex-M7 + Cortex-M4) in
-[examples/h755zi-dual-core](../examples/h755zi-dual-core), and with an
+Exercised with the STM32H755ZI (dual core, Cortex-M7 + Cortex-M4) in two
+examples, [examples/h755zi-freertos](../examples/h755zi-freertos) and
+[examples/h755zi-threadx](../examples/h755zi-threadx), and with an
 STM32F411CE build as a portability check (see
 [Portability](#portability)).
 
@@ -29,11 +30,13 @@ Diagrams:
 |---|---|
 | [cmake/toolchain/arm-none-eabi-gcc.cmake](../cmake/toolchain/arm-none-eabi-gcc.cmake) | Finds the compiler and binutils. No CPU flags. |
 | [cmake/mcu.cmake](../cmake/mcu.cmake) | Entry point, `include(mcu)` after `project()`. |
+| [cmake/mcu/naming.cmake](../cmake/mcu/naming.cmake) | `mcu_add_named_library()`, `mcu_resolve_target()` |
 | [cmake/mcu/chip.cmake](../cmake/mcu/chip.cmake) | `mcu_add_chip()` |
 | [cmake/mcu/arch/arm.cmake](../cmake/mcu/arch/arm.cmake) | Cortex-M flag handler used by `mcu_add_chip()` |
 | [cmake/mcu/linker.cmake](../cmake/mcu/linker.cmake) | `mcu_add_linker_script()` |
 | [cmake/mcu/linker/default.ld.in](../cmake/mcu/linker/default.ld.in) | Default linker script template. |
 | [cmake/mcu/package.cmake](../cmake/mcu/package.cmake) | `mcu_fetch_package()`: git fetch helper for vendor modules |
+| [cmake/mcu/git_sparse_fetch.cmake](../cmake/mcu/git_sparse_fetch.cmake) | Sparse partial clone script used by `mcu_fetch_package(SPARSE_PATHS ...)` |
 | [cmake/mcu/runtime.cmake](../cmake/mcu/runtime.cmake) | `mcu_target_add_runtime()` and [runtime/](../cmake/mcu/runtime) sources |
 | [cmake/mcu/outputs.cmake](../cmake/mcu/outputs.cmake) | `mcu_add_firmware_outputs()` |
 | [cmake/mcu/support_targets.cmake](../cmake/mcu/support_targets.cmake) | `mcu::cxx_bare_metal`, `mcu::newlib_nano`, `mcu::warnings` |
@@ -41,6 +44,13 @@ Diagrams:
 | [cmake/vendors/st/cmsis_device.cmake](../cmake/vendors/st/cmsis_device.cmake) | `st_fetch_cmsis_device()`, `st_add_cmsis_startup()` |
 | [cmake/vendors/st/hal.cmake](../cmake/vendors/st/hal.cmake) | `st_fetch_hal()`, `st_add_hal()` |
 | [cmake/vendors/freertos/kernel.cmake](../cmake/vendors/freertos/kernel.cmake) | `freertos_fetch_kernel()`, `freertos_add_kernel()` |
+| [cmake/vendors/threadx/kernel.cmake](../cmake/vendors/threadx/kernel.cmake) | `threadx_fetch_kernel()`, `threadx_add_kernel()` |
+| [cmake/vendors/threadx/filex.cmake](../cmake/vendors/threadx/filex.cmake) | `threadx_fetch_filex()`, `threadx_add_filex()` |
+| [cmake/vendors/threadx/levelx.cmake](../cmake/vendors/threadx/levelx.cmake) | `threadx_fetch_levelx()`, `threadx_add_levelx()` |
+| [cmake/vendors/threadx/netxduo.cmake](../cmake/vendors/threadx/netxduo.cmake) | `threadx_fetch_netxduo()`, `threadx_add_netxduo()` |
+| [cmake/vendors/threadx/usbx.cmake](../cmake/vendors/threadx/usbx.cmake) | `threadx_fetch_usbx()`, `threadx_add_usbx()` |
+| [cmake/vendors/threadx/guix.cmake](../cmake/vendors/threadx/guix.cmake) | `threadx_fetch_guix()`, `threadx_add_guix()` |
+| [cmake/vendors/threadx/common.cmake](../cmake/vendors/threadx/common.cmake) | Shared helpers of the ThreadX modules |
 
 Requirements: CMake 3.25+, git, arm-none-eabi-gcc with newlib-nano,
 binutils 2.38+ (for `READONLY` in the linker script).
@@ -75,25 +85,26 @@ mcu_add_chip(STM32H755ZI
     SHARED_D3 xrw 0x38000000 64K
 )
 
-add_library(hal_conf INTERFACE)                 # provides stm32h7xx_hal_conf.h
-target_include_directories(hal_conf INTERFACE config)
+# Provides stm32h7xx_hal_conf.h
+mcu_add_named_library(board::hal_conf INTERFACE hal_conf_target)
+target_include_directories(${hal_conf_target} INTERFACE config)
 
-st_add_hal(hal_cm7
+st_add_hal(board::hal_cm7
   CHIP mcu::STM32H755ZI::CM7
-  CONFIG hal_conf
+  CONFIG board::hal_conf
   MODULES GPIO PWR
 )
-st_add_cmsis_startup(startup_cm7
+st_add_cmsis_startup(board::startup_cm7
   CHIP mcu::STM32H755ZI::CM7
   STARTUP startup_stm32h755xx.s
   SYSTEM system_stm32h7xx_dualcore_boot_cm4_cm7.c
-  HAL hal_cm7
+  HAL board::hal_cm7
 )
 
 add_executable(firmware_cm7 main.cc)
 target_link_libraries(firmware_cm7 PRIVATE
-  startup_cm7
-  hal_cm7
+  board::startup_cm7
+  board::hal_cm7
   mcu::cxx_bare_metal
   mcu::newlib_nano
   mcu::warnings
@@ -112,12 +123,45 @@ Configure with the toolchain file, for example through the presets of the
 example:
 
 ```
-cd examples/h755zi-dual-core
+cd examples/h755zi-freertos      # or examples/h755zi-threadx
 cmake --preset debug
 cmake --build --preset debug
 ```
 
 ## Core API (vendor-neutral)
+
+### Target naming
+
+Libraries created by the `*_add_*()` functions are named by the project and
+may carry a namespace, e.g. `st_add_hal(board::hal_cm7 ...)`. A namespaced
+name becomes an `ALIAS` of a real target with `::` replaced by `_`
+(`board_hal_cm7`). Link against the namespaced name: CMake treats names
+containing `::` as targets and fails at configure time on a typo, while an
+unknown plain name silently becomes a `-l<name>` linker flag.
+
+Why not fixed namespaces like ObKo/stm32-cmake (`FreeRTOS::ARM_CM4F`,
+`HAL::STM32::F4::GPIO`)? Those were IMPORTED INTERFACE targets carrying
+sources, so every consumer compiled its own copy (duplicate objects when a
+library and the executable both link them), and a predefined name cannot
+express project-specific parameters such as the config header, port, heap
+or two configurations on one core. Here every library is a real STATIC (or
+OBJECT) target, built once, with a name the project chooses.
+
+Fixed, parameter-free targets do use fixed namespaces: `mcu::<chip>`,
+`mcu::warnings`, `arm::cmsis_core`, `st::cmsis_device::<family>`.
+
+```
+mcu_add_named_library(<name> <STATIC|OBJECT|INTERFACE> <out_var> [<source>...])
+mcu_resolve_target(<name> <out_var>)
+```
+
+`mcu_add_named_library()` creates the target (and alias) and returns the
+real name for `target_*()` calls, which do not accept aliases; it fails on
+invalid names and on collisions (`a::b_c` vs. `a_b::c`).
+`mcu_resolve_target()` returns the real target behind an alias; the core
+functions that modify a given target (`mcu_add_linker_script()`,
+`mcu_add_firmware_outputs()`, `mcu_target_add_runtime()`) use it, so they
+accept aliases.
 
 ### `mcu_add_chip()`
 
@@ -190,13 +234,21 @@ missing.
 mcu_fetch_package(<name>
   GIT_REPOSITORY <url>
   GIT_TAG <tag|commit>
+  [SPARSE_PATHS <dir>...]
   [OUT_SOURCE_DIR <var>])
 ```
 
 The building block for vendor modules.
 
-- Clones `GIT_TAG` shallow; a full 40-character commit hash falls back to a
-  full clone (git cannot shallow-fetch an arbitrary commit).
+- With `SPARSE_PATHS` (used by all vendor modules): fetches only `GIT_TAG`
+  with depth 1 as a partial clone (`--filter=blob:none`) and a cone-mode
+  sparse checkout of the listed directories plus top-level files. Works for
+  tags and full commit hashes (on hosts that allow fetching reachable
+  commits by hash, such as GitHub and GitLab). A stamp file skips the fetch
+  on reconfigure. Example: GUIX drops from more than 300 MB (shallow clone,
+  not finished after 10 minutes) to 21 MB in 2 s.
+- Without `SPARSE_PATHS`: `GIT_TAG` is cloned shallow; a full 40-character
+  commit hash falls back to a full clone.
 - Only downloads; never calls `add_subdirectory()`, so repositories with
   their own `CMakeLists.txt` do not inject targets.
 - Fetching the same `<name>` again with the same repository and tag is a
@@ -240,7 +292,10 @@ per-region usage report, and `arm-none-eabi-size` output.
 
 Each vendor package has its own file under `cmake/vendors/<vendor>/` and a
 `<vendor>_fetch_<package>()` function that takes the version from the
-project. Including a module also includes the modules it depends on.
+project. Including a module also includes the modules it depends on. Every
+`<vendor>_add_<package>(<name> ...)` accepts a namespaced `<name>` (see
+[Target naming](#target-naming)), and every fetch is sparse: only the
+directories the module builds from are downloaded.
 
 ### Arm: `vendors/arm/cmsis_core`
 
@@ -333,14 +388,88 @@ freertos_add_kernel(<name>
   static allocation only.
 - Kernel and port headers are `SYSTEM` includes.
 
+### ThreadX: `vendors/threadx/kernel`
+
+```
+threadx_fetch_kernel(GIT_TAG <tag|commit> [GIT_REPOSITORY <url>])
+
+threadx_add_kernel(<name>
+  CHIP <chip target>
+  PORT <port>
+  [CONFIG <target>])
+```
+
+- Vendor-neutral: `CHIP` only provides the CPU flags. Default repository:
+  `eclipse-threadx/threadx`.
+- `threadx_add_kernel()` creates the **STATIC** library `<name>` (all
+  `common/src` sources plus the GNU port), compiled once with the chip's
+  flags. ThreadX's own `CMakeLists.txt` is not used: it builds one global
+  `threadx` target per build tree from `THREADX_ARCH`, which does not fit
+  dual-core parts.
+- `PORT` is a directory under `ports/` with a `gnu` toolchain directory
+  (`cortex_m4`, `cortex_m7`, `cortex_m33`, ...). The port's source list is
+  read from `ports/<port>/gnu/CMakeLists.txt`, so per-port differences
+  follow upstream. SMP and module ports are not covered.
+- `CONFIG` (optional) is a target whose include directories contain
+  `tx_user.h`; it adds `TX_INCLUDE_USER_DEFINE_FILE`.
+- Requires C and ASM enabled in `project()` (the port is assembly).
+- The application provides `_tx_initialize_low_level()` (system stack
+  pointer, tick timer, exception priorities) and calls
+  `_tx_timer_interrupt()` from its tick ISR. Upstream's
+  `example_build/tx_initialize_low_level.S` depends on its own linker
+  symbols and clock value, so it is not used. The port already defines
+  `PendSV_Handler` under its CMSIS name.
+
+### ThreadX middleware: FileX, LevelX, NetX Duo, USBX, GUIX
+
+One file each under `vendors/threadx/`, same pattern:
+
+```
+threadx_fetch_<component>(GIT_TAG <tag|commit> [GIT_REPOSITORY <url>])
+
+threadx_add_filex(<name>   KERNEL <kernel> [PORT <port>] [CONFIG <target>])
+threadx_add_levelx(<name>  KERNEL <kernel> [FILEX <filex>] [CONFIG <target>])
+threadx_add_netxduo(<name> KERNEL <kernel> [PORT <port>] [CONFIG <target>]
+                           [ADDONS <addon>...] [SECURE])
+threadx_add_usbx(<name>    KERNEL <kernel> [PORT <port>] [CONFIG <target>]
+                           [NETX <netxduo>] [FILEX <filex>] [PARTS <part>...])
+threadx_add_guix(<name>    KERNEL <kernel> [PORT <port>] [CONFIG <target>])
+```
+
+- Each creates a **STATIC** library linked to the ThreadX kernel target
+  (which brings the chip's CPU flags and the ThreadX headers), so a
+  component is built per core like the kernel. `PORT` defaults to the
+  kernel's port; `CONFIG` provides the component's `*_user.h` and adds its
+  `*_INCLUDE_USER_DEFINE_FILE` define.
+- Drivers are the application's. Bundled RAM-backed drivers that need no
+  hardware: FileX `_fx_ram_driver`, LevelX NOR / NAND simulators (and, with
+  `FILEX`, the FileX media drivers on top of them), NetX Duo
+  `_nx_ram_network_driver`.
+- NetX Duo: `ADDONS` selects directories under `addons/` (`dhcp`, `dns`,
+  `mqtt`, `sntp`, `http`, ...; the message lists them, `azure_iot` is not
+  supported). `SECURE` adds NetX Secure (TLS/DTLS) and the crypto library
+  with its port.
+- USBX: `PARTS` selects `device_classes`, `host_classes`,
+  `host_controllers`, `network`, `pictbridge` (default: all; core is always
+  built). Classes whose header includes `nx_api.h` (CDC-ECM, RNDIS, ASIX,
+  network) are built only with `NETX`, those including `fx_api.h` (host
+  storage) only with `FILEX`; `NETX` also adds the network part. The STM32
+  device / host controller drivers are no longer part of the USBX
+  repository.
+- GUIX: only `common/` and `ports/` are fetched; there is no GNU port for
+  `cortex_m33`.
+
 ### Vendor module errors
 
 `FATAL_ERROR` when: `GIT_TAG` or `FAMILY` is missing, the call order is
 wrong (`st_fetch_cmsis_device()` before `arm_fetch_cmsis_core()`,
-`st_add_hal()` / `st_add_cmsis_startup()` / `freertos_add_kernel()` before
-the matching fetch), an unknown FreeRTOS port (the message lists the
-Cortex-M ports), an MPU port, an invalid `HEAP`, a missing
-`FreeRTOSConfig.h`, a
+`st_add_hal()` / `st_add_cmsis_startup()` / `freertos_add_kernel()` /
+`threadx_add_kernel()` / `threadx_add_<component>()` before the matching
+fetch), an unknown FreeRTOS or ThreadX port (the message lists the
+available ports), a component `KERNEL` that was not created by
+`threadx_add_kernel()`, an unknown NetX Duo addon or USBX part, USBX
+`PARTS network` without `NETX`, a FreeRTOS MPU port, an invalid `HEAP`, a
+missing `FreeRTOSConfig.h`, `tx_user.h` or component `*_user.h`, a
 package is fetched twice with different versions, the fetched repository
 does not look like the expected package, the chip has no `FAMILY`, the HAL
 config header is missing, or a HAL / LL module, startup or system file does
@@ -377,22 +506,45 @@ Checked with the unchanged module files:
   stm32f4xx-hal-driver v1.8.5, CMSIS_6 v6.1.0): HAL blinky builds without
   warnings.
 - A generic Cortex-M4F chip without any vendor package (nRF52840 memory
-  map): the FreeRTOS kernel with `ARM_CM4F` and `HEAP 4` builds without
-  warnings.
+  map): the FreeRTOS kernel (`ARM_CM4F`, `HEAP 4`) and the ThreadX kernel
+  (`cortex_m4`, no `CONFIG`) build without warnings.
+- The same STM32H755ZI chip description runs under FreeRTOS and under
+  ThreadX; only the RTOS module calls, the RTOS config header and the
+  application's task code differ between the two examples.
 
-## H755ZI dual-core example
+## H755ZI examples
+
+Two examples run both cores of the STM32H755ZI, one under FreeRTOS and one
+under ThreadX. They share
+[examples/common/stm32h755zi](../examples/common/stm32h755zi): the chip
+description (`stm32h755zi.cmake` with both `mcu_add_chip()` calls, the HAL
+config target and the startup / system file names), `stm32h7xx_hal_conf.h`
+and `shared_mailbox.h`.
 
 | | CM7 | CM4 |
 |---|---|---|
 | Chip target | `mcu::STM32H755ZI::CM7` | `mcu::STM32H755ZI::CM4` |
 | CPU flags | `cortex-m7`, `fpv5-d16`, hard | `cortex-m4`, `fpv4-sp-d16`, hard |
 | HAL library | `hal_cm7` (GPIO, HSEM, PWR + CORTEX, RCC) | `hal_cm4` (same modules) |
-| FreeRTOS kernel | `rtos_cm7`, port `ARM_CM4F`, `HEAP NONE` | `rtos_cm4`, port `ARM_CM4F`, `HEAP NONE` |
+| RTOS kernel | FreeRTOS `rtos_cm7`, port `ARM_CM4F`, `HEAP NONE`; ThreadX `rtos_cm7`, port `cortex_m7` | FreeRTOS `rtos_cm4`, port `ARM_CM4F`, `HEAP NONE`; ThreadX `rtos_cm4`, port `cortex_m4` |
 | Startup | `startup_cm7` | `startup_cm4` |
 | Flash | bank 1, `0x08000000`, 1024K | bank 2, `0x08100000`, 1024K |
 | `.data` / `.bss` / stack | DTCM, `0x20000000`, 128K | D2 SRAM via CM4 alias, `0x10000000`, 288K |
 | Extra regions | ITCM, AXI SRAM (`.ram_d1`), D3 SRAM (`.shared_d3`) | D3 SRAM (`.shared_d3`) |
 | LED task (NUCLEO-H755ZI-Q) | LD1, PB0, 500 ms | LD2, PE1, 250 ms |
+
+- D3 SRAM at `0x38000000` is shared. Both images place their `.shared_d3`
+  section at the same address, so `shared_mailbox.h` is the layout contract
+  between the two images.
+- The CM7 D-cache is off after reset. Once it is enabled, mark D3 SRAM
+  non-cacheable in the MPU or use cache maintenance around shared accesses.
+- Both cores use `startup_stm32h755xx.s` and
+  `system_stm32h7xx_dualcore_boot_cm4_cm7.c` (both cores boot at reset);
+  `CORE_CM7` / `CORE_CM4` from the chip targets select the core-specific
+  code in the system file.
+- `stm32h7xx_hal_conf.h` is ST's unmodified template (all modules enabled).
+
+### FreeRTOS: `examples/h755zi-freertos`
 
 - Package versions are set at the top of the example's `CMakeLists.txt`
   (`CMSIS_CORE_VERSION`, `ST_CMSIS_DEVICE_H7_VERSION`, `ST_HAL_H7_VERSION`,
@@ -408,24 +560,48 @@ Checked with the unchanged module files:
 - `common/rtos_glue.cc` defines `SysTick_Handler`, which drives both the HAL
   tick and the FreeRTOS tick (both 1 kHz), and the stack overflow hook
   (trap into the debugger).
-- Both cores use `startup_stm32h755xx.s` and
-  `system_stm32h7xx_dualcore_boot_cm4_cm7.c` (both cores boot at reset);
-  `CORE_CM7` / `CORE_CM4` from the chip targets select the core-specific
-  code in the system file.
-- `common/stm32h7xx_hal_conf.h` is ST's unmodified template (all modules
-  enabled), shared by both cores through the `h755_hal_conf` target.
-- D3 SRAM at `0x38000000` is shared. Both images place their `.shared_d3`
-  section at the same address, so `common/shared_mailbox.h` is the layout
-  contract between the two images.
-- The CM7 D-cache is off after reset. Once it is enabled, mark D3 SRAM
-  non-cacheable in the MPU or use cache maintenance around shared accesses.
+- The CM7 uses the `ARM_CM4F` port, which assumes its core revision is not
+  r0p1 (r0p1 cores need `ARM_CM7/r0p1`); verify in the device errata sheet.
+
+### ThreadX: `examples/h755zi-threadx`
+
+- Same chip description, HAL and startup as the FreeRTOS example;
+  `THREADX_KERNEL_VERSION` selects the kernel tag.
+- One ThreadX kernel per core: port `cortex_m7` on the CM7, `cortex_m4` on
+  the CM4, shared `common/tx_user.h` (1 kHz tick, stack checking, timer
+  processing in the tick ISR).
+- Each core creates one blink thread with a static stack in
+  `tx_application_define()`; no byte pool, no `malloc`.
+- `common/tx_glue.cc` provides `_tx_initialize_low_level()`: system stack
+  pointer from the first word of the active vector table (`SCB->VTOR`),
+  PendSV / SVCall at the lowest priority, SysTick at 1 kHz with priority 4.
+  Its `SysTick_Handler` drives the HAL tick and, once the low-level init has
+  run, `_tx_timer_interrupt()`.
+- `main()` calls `__disable_irq()` before `tx_kernel_enter()`: ThreadX does
+  not disable interrupts during kernel entry, but `HAL_Init()` has already
+  started SysTick (see [Toolchain pitfalls](#toolchain-pitfalls)).
+- The CM7 image also links FileX, LevelX (with FileX), NetX Duo, USBX
+  (`device_classes`, with `NETX`) and GUIX, all with their default
+  configuration. `cm7/middleware_demo.cc` runs in its own thread: FileX on a
+  64 KiB RAM disk in AXI SRAM, FileX on the LevelX NOR simulator, a ping
+  from 1.2.3.4 to 1.2.3.5 between two IP instances on the NetX RAM driver,
+  USBX and GUIX system initialization. Each step's status goes into
+  `middleware_demo_status` for inspection in a debugger. Large buffers and
+  thread stacks are in `.ram_d1`; the LevelX simulator's 64 KiB array sits
+  in DTCM `.bss`.
+- `THREADX_FILEX_VERSION`, ... default to `THREADX_KERNEL_VERSION` and can
+  be overridden one by one (e.g. the NetX Duo hotfix tag
+  `v6.5.2.202603a_rel`).
 
 ### Verified build results
 
 arm-none-eabi-gcc 15.2.0, CMake 4.3, Ninja; CMSIS_6 v6.1.0, cmsis-device-h7
-v1.10.7, stm32h7xx-hal-driver v1.11.6, FreeRTOS-Kernel V11.3.2. Both presets
-build without warnings, including the HAL and kernel sources and
-`mcu::warnings` on the application code. Not yet run on hardware.
+v1.10.7, stm32h7xx-hal-driver v1.11.6, FreeRTOS-Kernel V11.3.2, ThreadX
+v6.5.2.202603_rel. Both examples build without warnings in both presets,
+including the HAL and kernel sources and `mcu::warnings` on the application
+code. Not yet run on hardware.
+
+FreeRTOS example:
 
 | | CM7 | CM4 |
 |---|---|---|
@@ -438,9 +614,35 @@ build without warnings, including the HAL and kernel sources and
 
 - Each HAL library and each kernel is compiled once per core (8 objects
   each), with that core's CPU flags.
+
+ThreadX example:
+
+| | CM7 | CM4 |
+|---|---|---|
+| `PendSV_Handler` in the vector table | ThreadX port | same |
+| `SysTick_Handler` | `tx_glue.cc` (HAL + ThreadX tick) | same |
+| `malloc` linked | no | no |
+| Kernel | 192 objects, `cortex_m7`, `-mfpu=fpv5-d16` | 192 objects, `cortex_m4`, `-mfpu=fpv4-sp-d16` |
+| Middleware | FileX 212, LevelX 65, NetX Duo 511, USBX 447, GUIX 1315 objects, CM7 flags | none |
+| Flash used, Debug / MinSizeRel | 124264 B / 65740 B | 11292 B / 6356 B |
+| DTCM / RAM used, Debug | DTCM 117088 B of 128 KiB, AXI SRAM 128 KiB | RAM_D2 5744 B |
+
+The middleware symbols checked in the CM7 image: `_fx_media_format`,
+`_fx_ram_driver`, `_fx_nor_flash_simulator_driver`, `_lx_nor_flash_open`,
+`_nx_icmp_ping`, `_nx_ram_network_driver`, `_ux_system_initialize`,
+`_gx_system_initialize`; no `malloc`.
+
+Also built without warnings on a generic Cortex-M4F chip (no vendor
+package): NetX Duo with `ADDONS dhcp dns mqtt sntp SECURE` (879 objects),
+USBX without dependencies (832 objects, no CDC-ECM / host storage) and with
+`NETX` + `FILEX` (919 objects), LevelX without FileX.
 - The flash LOAD segment is `R E`, not RWX.
-- The first configure clones about 125 MB (CMSIS_6 33 MB, cmsis-device-h7
-  52 MB, HAL 19 MB, FreeRTOS-Kernel about 22 MB, including `.git`).
+- With sparse fetches the FreeRTOS example downloads about 93 MB (CMSIS_6
+  3.8 MB, cmsis-device-h7 47 MB, HAL 18 MB, FreeRTOS-Kernel 24 MB, including
+  `.git`) and configures in about 17 s here (55 s with full shallow
+  clones). The ThreadX example adds the kernel (49 MB), FileX (3.2 MB),
+  LevelX (1.2 MB), NetX Duo (30 MB), USBX (14 MB) and GUIX (21 MB); about
+  42 s.
 
 ## Toolchain pitfalls
 
@@ -468,6 +670,24 @@ declaration gets C++ linkage and conflicts with the `extern "C"` declaration
 in ST's `system_stm32h7xx.h`. The example's config wraps it in
 `extern "C"` when `__cplusplus` is defined.
 
+### ThreadX internal headers in C++
+
+`tx_api.h` has C++ guards, but internal headers such as `tx_initialize.h`
+and `tx_thread.h` (needed in `_tx_initialize_low_level()` for
+`_tx_thread_system_stack_ptr`) do not. Included from C++, their function
+declarations get C++ linkage and conflict with an `extern "C"` definition.
+`tx_glue.cc` includes them inside an `extern "C"` block.
+
+### ThreadX timer interrupt before kernel start
+
+`tx_kernel_enter()` neither disables interrupts nor initializes the timer
+before calling `_tx_initialize_low_level()`; the scheduler enables
+interrupts when the first thread runs. `HAL_Init()` has already started
+SysTick, so a tick ISR calling `_tx_timer_interrupt()` too early would use
+uninitialized timer state. The example disables interrupts before
+`tx_kernel_enter()` and only forwards ticks to ThreadX after its low-level
+init has run.
+
 ### Extra ~5 KB in Debug builds with GCC 15
 
 GCC 15 defines `_GLIBCXX_ASSERTIONS` for unoptimized (`-O0`) builds, so
@@ -484,16 +704,24 @@ the checks stay active in Debug, and a failure stops in the debugger.
 - The example has not been run on hardware. It runs on the reset clock and
   has no power supply (`HAL_PWREx_ConfigSupply`), clock tree or HSEM boot
   synchronization between the cores yet.
-- SysTick is shared by the HAL tick and FreeRTOS. ST recommends a basic timer
-  (e.g. TIM6/TIM7) as HAL time base when an RTOS uses SysTick; switch to that
-  once the HAL is used beyond simple GPIO.
+- SysTick is shared by the HAL tick and the RTOS tick. ST recommends a basic
+  timer (e.g. TIM6/TIM7) as HAL time base when an RTOS uses SysTick; switch
+  to that once the HAL is used beyond simple GPIO.
 - `stm32h7xx_hal_conf.h` is the unmodified template; set `HSE_VALUE` and
   disable unused modules for the real board.
 - Packages are cloned per build tree (Debug and Release each clone once).
   Use `FETCHCONTENT_SOURCE_DIR_*` to share one local copy.
-- Fetching by full commit hash (non-shallow clone) is implemented but not
-  yet exercised.
+- Fetching by commit hash is tested for sparse fetches (depth 1); the
+  non-sparse path (full clone) is not exercised.
 - Defining the same chip twice is a `FATAL_ERROR`, also when two
   subprojects of one superbuild do it.
-- FreeRTOS MPU ports and FreeRTOS+ libraries (TCP, CLI, ...) are not
-  covered yet.
+- Not covered yet: FreeRTOS MPU ports, FreeRTOS+ libraries (TCP, CLI, ...),
+  ThreadX SMP / module ports, NetX Duo `azure_iot`, TSN and utilities.
+- The ThreadX middleware runs with RAM-backed drivers only. Real drivers
+  (SDMMC / QSPI flash for FileX and LevelX, the H7 Ethernet MAC for NetX
+  Duo, the USB OTG controller for USBX, a display for GUIX) are the next
+  step; the STM32 USBX controller drivers come from ST, not from the USBX
+  repository.
+- DTCM of the ThreadX CM7 image is 89 % used, mostly by the LevelX NOR
+  simulator (64 KiB) and the two `FX_MEDIA` blocks; drop the simulator or
+  move `.data` / `.bss` to AXI SRAM (`RAM_REGION RAM_D1`) when adding more.

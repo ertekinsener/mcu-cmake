@@ -19,6 +19,7 @@ function(mcu_target_add_runtime target)
   if(NOT TARGET ${target})
     message(FATAL_ERROR "${context}: ${target} is not a target")
   endif()
+  mcu_resolve_target(${target} target)
 
   get_target_property(type ${target} TYPE)
   if(type STREQUAL "OBJECT_LIBRARY")

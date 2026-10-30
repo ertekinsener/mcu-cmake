@@ -32,6 +32,8 @@ function(arm_fetch_cmsis_core)
   mcu_fetch_package(arm_cmsis_core
     GIT_REPOSITORY ${arg_GIT_REPOSITORY}
     GIT_TAG ${arg_GIT_TAG}
+    # Arm layout and vendor mirrors with a top-level Include/.
+    SPARSE_PATHS CMSIS/Core Include
     OUT_SOURCE_DIR source_dir
   )
   if(TARGET arm_cmsis_core)

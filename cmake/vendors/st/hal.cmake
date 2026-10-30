@@ -7,7 +7,7 @@
 #     GIT_TAG <tag|commit>          # chosen by the project, e.g. v1.11.6
 #     [GIT_REPOSITORY <url>])       # default: STMicroelectronics/stm32<family>xx-hal-driver
 #
-#   st_add_hal(<name>
+#   st_add_hal(<name>               # may be namespaced, e.g. board::hal_cm7
 #     CHIP <chip target>            # chip with FAMILY set
 #     CONFIG <target>               # provides stm32<family>xx_hal_conf.h
 #     [MODULES <module>...]         # HAL modules, e.g. GPIO UART; CORTEX and
@@ -44,6 +44,7 @@ function(st_fetch_hal)
   mcu_fetch_package(st_hal_${family_l}
     GIT_REPOSITORY ${arg_GIT_REPOSITORY}
     GIT_TAG ${arg_GIT_TAG}
+    SPARSE_PATHS Inc Src
     OUT_SOURCE_DIR source_dir
   )
   if(NOT EXISTS "${source_dir}/Src/stm32${family_l}xx_hal.c")
@@ -125,13 +126,13 @@ function(st_add_hal name)
     list(APPEND sources "${source}")
   endforeach()
 
-  add_library(${name} STATIC ${sources})
-  target_include_directories(${name} SYSTEM PUBLIC "${hal_dir}/Inc")
-  target_compile_definitions(${name} PUBLIC USE_HAL_DRIVER)
+  mcu_add_named_library(${name} STATIC target ${sources})
+  target_include_directories(${target} SYSTEM PUBLIC "${hal_dir}/Inc")
+  target_compile_definitions(${target} PUBLIC USE_HAL_DRIVER)
   if(ll_modules)
-    target_compile_definitions(${name} PUBLIC USE_FULL_LL_DRIVER)
+    target_compile_definitions(${target} PUBLIC USE_FULL_LL_DRIVER)
   endif()
-  target_link_libraries(${name} PUBLIC
+  target_link_libraries(${target} PUBLIC
     ${arg_CHIP}
     st::cmsis_device::${family}
     ${arg_CONFIG}
