@@ -4,6 +4,7 @@ project(h755zi_dual_core C CXX ASM)
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../../cmake")
 include(mcu)
 include(vendors/st/hal)
+include(vendors/freertos/kernel)
 
 # Vendor package versions are chosen here, not in the module. Override on the
 # command line, e.g. -DST_HAL_H7_VERSION=v1.11.5. A commit hash also works.
@@ -16,10 +17,14 @@ endif()
 if(NOT DEFINED ST_HAL_H7_VERSION)
   set(ST_HAL_H7_VERSION v1.11.6)
 endif()
+if(NOT DEFINED FREERTOS_KERNEL_VERSION)
+  set(FREERTOS_KERNEL_VERSION V11.3.2)
+endif()
 
 arm_fetch_cmsis_core(GIT_TAG ${CMSIS_CORE_VERSION})
 st_fetch_cmsis_device(FAMILY H7 GIT_TAG ${ST_CMSIS_DEVICE_H7_VERSION})
 st_fetch_hal(FAMILY H7 GIT_TAG ${ST_HAL_H7_VERSION})
+freertos_fetch_kernel(GIT_TAG ${FREERTOS_KERNEL_VERSION})
 
 # STM32H755ZI memory map, from RM0399 (STM32H745/755/747/757) "Memory map".
 # Verify against the current reference manual before changing.
@@ -61,6 +66,10 @@ mcu_add_chip(STM32H755ZI
 add_library(h755_hal_conf INTERFACE)
 target_include_directories(h755_hal_conf INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}/common")
 
+# FreeRTOS configuration shared by both cores (FreeRTOSConfig.h).
+add_library(h755_freertos_conf INTERFACE)
+target_include_directories(h755_freertos_conf INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}/common")
+
 # Headers shared by both firmware images.
 add_library(h755_common INTERFACE)
 target_include_directories(h755_common INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}/common")
@@ -69,6 +78,13 @@ target_include_directories(h755_common INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}/co
 # dualcore_boot_cm4_cm7 system file. startup_stm32h755xx.s serves both cores.
 set(h755_startup startup_stm32h755xx.s)
 set(h755_system system_stm32h7xx_dualcore_boot_cm4_cm7.c)
+
+# One FreeRTOS kernel per core, static allocation only (HEAP NONE).
+# The CM7 of the STM32H7 is not an r0p1 core, so it uses the ARM_CM4F port
+# (FreeRTOS portable/GCC/ARM_CM7/ReadMe.txt). Check the core revision in the
+# errata sheet when porting to another Cortex-M7 part.
+set(h755_rtos_port_cm7 ARM_CM4F)
+set(h755_rtos_port_cm4 ARM_CM4F)
 
 # --- Cortex-M7 -------------------------------------------------------------
 
@@ -83,12 +99,19 @@ st_add_cmsis_startup(startup_cm7
   SYSTEM ${h755_system}
   HAL hal_cm7
 )
+freertos_add_kernel(rtos_cm7
+  CHIP mcu::STM32H755ZI::CM7
+  CONFIG h755_freertos_conf
+  PORT ${h755_rtos_port_cm7}
+  HEAP NONE
+)
 
-add_executable(firmware_cm7 cm7/main.cc)
+add_executable(firmware_cm7 cm7/main.cc common/rtos_glue.cc)
 target_compile_features(firmware_cm7 PRIVATE cxx_std_23)
 target_link_libraries(firmware_cm7 PRIVATE
   startup_cm7
   hal_cm7
+  rtos_cm7
   h755_common
   mcu::cxx_bare_metal
   mcu::newlib_nano
@@ -116,12 +139,19 @@ st_add_cmsis_startup(startup_cm4
   SYSTEM ${h755_system}
   HAL hal_cm4
 )
+freertos_add_kernel(rtos_cm4
+  CHIP mcu::STM32H755ZI::CM4
+  CONFIG h755_freertos_conf
+  PORT ${h755_rtos_port_cm4}
+  HEAP NONE
+)
 
-add_executable(firmware_cm4 cm4/main.cc)
+add_executable(firmware_cm4 cm4/main.cc common/rtos_glue.cc)
 target_compile_features(firmware_cm4 PRIVATE cxx_std_23)
 target_link_libraries(firmware_cm4 PRIVATE
   startup_cm4
   hal_cm4
+  rtos_cm4
   h755_common
   mcu::cxx_bare_metal
   mcu::newlib_nano

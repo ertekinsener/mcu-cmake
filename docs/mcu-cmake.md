@@ -1,7 +1,7 @@
 # mcu-cmake
 
 A small, target-based CMake module for bare-metal MCU firmware. The core is
-vendor-neutral; vendor packages (CMSIS, HAL, ...) live in separate modules,
+vendor-neutral; vendor packages (CMSIS, HAL, FreeRTOS, ...) live in separate modules,
 one file per package, and are fetched from upstream git at versions chosen by
 the project.
 
@@ -40,6 +40,7 @@ Diagrams:
 | [cmake/vendors/arm/cmsis_core.cmake](../cmake/vendors/arm/cmsis_core.cmake) | `arm_fetch_cmsis_core()` |
 | [cmake/vendors/st/cmsis_device.cmake](../cmake/vendors/st/cmsis_device.cmake) | `st_fetch_cmsis_device()`, `st_add_cmsis_startup()` |
 | [cmake/vendors/st/hal.cmake](../cmake/vendors/st/hal.cmake) | `st_fetch_hal()`, `st_add_hal()` |
+| [cmake/vendors/freertos/kernel.cmake](../cmake/vendors/freertos/kernel.cmake) | `freertos_fetch_kernel()`, `freertos_add_kernel()` |
 
 Requirements: CMake 3.25+, git, arm-none-eabi-gcc with newlib-nano,
 binutils 2.38+ (for `READONLY` in the linker script).
@@ -303,11 +304,43 @@ st_add_hal(<name>
 - Public usage requirements: `USE_HAL_DRIVER`, HAL / CMSIS include
   directories (`SYSTEM`), the chip target and the config target.
 
+### FreeRTOS: `vendors/freertos/kernel`
+
+```
+freertos_fetch_kernel(GIT_TAG <tag|commit> [GIT_REPOSITORY <url>])
+
+freertos_add_kernel(<name>
+  CHIP <chip target>
+  CONFIG <target>
+  PORT <port>
+  HEAP <1|2|3|4|5|NONE>)
+```
+
+- Vendor-neutral: `CHIP` only provides the CPU flags, no `FAMILY` needed.
+  Default repository: `FreeRTOS/FreeRTOS-Kernel`.
+- `freertos_add_kernel()` creates the **STATIC** library `<name>` (kernel
+  sources, port, optional heap), compiled once with the chip's flags. The
+  kernel's own `CMakeLists.txt` is not used: it supports only one kernel per
+  build tree (a single global `freertos_config` target), which does not fit
+  dual-core parts that need one kernel per core.
+- `CONFIG` is a target whose include directories contain `FreeRTOSConfig.h`.
+- `PORT` is a directory under `portable/GCC` (`ARM_CM4F`, `ARM_CM7/r0p1`,
+  `ARM_CM33_NTZ/non_secure`, ...). The choice is explicit: e.g. only
+  Cortex-M7 r0p1 cores need `ARM_CM7/r0p1`, other Cortex-M7 revisions use
+  `ARM_CM4F`. MPU ports are rejected for now (they need extra common
+  sources).
+- `HEAP` selects `portable/MemMang/heap_<n>.c`; `NONE` links no heap, for
+  static allocation only.
+- Kernel and port headers are `SYSTEM` includes.
+
 ### Vendor module errors
 
 `FATAL_ERROR` when: `GIT_TAG` or `FAMILY` is missing, the call order is
 wrong (`st_fetch_cmsis_device()` before `arm_fetch_cmsis_core()`,
-`st_add_hal()` / `st_add_cmsis_startup()` before the matching fetch), a
+`st_add_hal()` / `st_add_cmsis_startup()` / `freertos_add_kernel()` before
+the matching fetch), an unknown FreeRTOS port (the message lists the
+Cortex-M ports), an MPU port, an invalid `HEAP`, a missing
+`FreeRTOSConfig.h`, a
 package is fetched twice with different versions, the fetched repository
 does not look like the expected package, the chip has no `FAMILY`, the HAL
 config header is missing, or a HAL / LL module, startup or system file does
@@ -338,9 +371,14 @@ What changes when the firmware moves:
 | Other Cortex-M vendor | chip values, vendor module calls, application drivers | a `vendors/<vendor>/` module if none exists |
 | Other architecture | toolchain, chip `ARCH` / values | toolchain file and `arch/` handler |
 
-Checked: an STM32F411CE (single core, `FAMILY F4`, cmsis-device-f4 v2.6.11,
-stm32f4xx-hal-driver v1.8.5, CMSIS_6 v6.1.0) builds a HAL blinky without
-warnings using the unchanged module files.
+Checked with the unchanged module files:
+
+- STM32F411CE (single core, `FAMILY F4`, cmsis-device-f4 v2.6.11,
+  stm32f4xx-hal-driver v1.8.5, CMSIS_6 v6.1.0): HAL blinky builds without
+  warnings.
+- A generic Cortex-M4F chip without any vendor package (nRF52840 memory
+  map): the FreeRTOS kernel with `ARM_CM4F` and `HEAP 4` builds without
+  warnings.
 
 ## H755ZI dual-core example
 
@@ -349,15 +387,27 @@ warnings using the unchanged module files.
 | Chip target | `mcu::STM32H755ZI::CM7` | `mcu::STM32H755ZI::CM4` |
 | CPU flags | `cortex-m7`, `fpv5-d16`, hard | `cortex-m4`, `fpv4-sp-d16`, hard |
 | HAL library | `hal_cm7` (GPIO, HSEM, PWR + CORTEX, RCC) | `hal_cm4` (same modules) |
+| FreeRTOS kernel | `rtos_cm7`, port `ARM_CM4F`, `HEAP NONE` | `rtos_cm4`, port `ARM_CM4F`, `HEAP NONE` |
 | Startup | `startup_cm7` | `startup_cm4` |
 | Flash | bank 1, `0x08000000`, 1024K | bank 2, `0x08100000`, 1024K |
 | `.data` / `.bss` / stack | DTCM, `0x20000000`, 128K | D2 SRAM via CM4 alias, `0x10000000`, 288K |
 | Extra regions | ITCM, AXI SRAM (`.ram_d1`), D3 SRAM (`.shared_d3`) | D3 SRAM (`.shared_d3`) |
-| LED (NUCLEO-H755ZI-Q) | LD1, PB0, 500 ms | LD2, PE1, 250 ms |
+| LED task (NUCLEO-H755ZI-Q) | LD1, PB0, 500 ms | LD2, PE1, 250 ms |
 
 - Package versions are set at the top of the example's `CMakeLists.txt`
-  (`CMSIS_CORE_VERSION`, `ST_CMSIS_DEVICE_H7_VERSION`, `ST_HAL_H7_VERSION`)
-  and can be overridden with `-D`, e.g. `-DST_HAL_H7_VERSION=v1.11.5`.
+  (`CMSIS_CORE_VERSION`, `ST_CMSIS_DEVICE_H7_VERSION`, `ST_HAL_H7_VERSION`,
+  `FREERTOS_KERNEL_VERSION`) and can be overridden with `-D`, e.g.
+  `-DST_HAL_H7_VERSION=v1.11.5`.
+- Each core runs its own FreeRTOS kernel with one statically allocated blink
+  task (`xTaskCreateStatic`, `xTaskDelayUntil`). `common/FreeRTOSConfig.h`
+  is shared: static allocation only (`configSUPPORT_DYNAMIC_ALLOCATION 0`,
+  `configKERNEL_PROVIDED_STATIC_MEMORY 1` for the idle task), no software
+  timers, stack overflow check 2, 4 NVIC priority bits, API calls allowed
+  from ISRs with priority 5..15. `vPortSVCHandler` / `xPortPendSVHandler` are
+  mapped to the CMSIS names `SVC_Handler` / `PendSV_Handler`.
+- `common/rtos_glue.cc` defines `SysTick_Handler`, which drives both the HAL
+  tick and the FreeRTOS tick (both 1 kHz), and the stack overflow hook
+  (trap into the debugger).
 - Both cores use `startup_stm32h755xx.s` and
   `system_stm32h7xx_dualcore_boot_cm4_cm7.c` (both cores boot at reset);
   `CORE_CM7` / `CORE_CM4` from the chip targets select the core-specific
@@ -373,22 +423,24 @@ warnings using the unchanged module files.
 ### Verified build results
 
 arm-none-eabi-gcc 15.2.0, CMake 4.3, Ninja; CMSIS_6 v6.1.0, cmsis-device-h7
-v1.10.7, stm32h7xx-hal-driver v1.11.6. Both presets build without warnings,
-including the HAL sources and `mcu::warnings` on the application code. Not
-yet run on hardware.
+v1.10.7, stm32h7xx-hal-driver v1.11.6, FreeRTOS-Kernel V11.3.2. Both presets
+build without warnings, including the HAL and kernel sources and
+`mcu::warnings` on the application code. Not yet run on hardware.
 
 | | CM7 | CM4 |
 |---|---|---|
 | Vector table | ST `g_pfnVectors` at `0x08000000`, 664 B (166 entries) | at `0x08100000` |
-| `SysTick_Handler` | application handler (overrides the weak one) | same |
+| `SVC_Handler`, `PendSV_Handler` in the vector table | FreeRTOS port handlers | same |
+| `SysTick_Handler` | `rtos_glue.cc` (HAL + FreeRTOS tick) | same |
 | `shared_mailbox` | `0x38000000` | `0x38000000` |
-| `crt0.o` linked | no | no |
-| Flash used, Debug / MinSizeRel | 4228 B / 2472 B | 3600 B / 2312 B |
+| `crt0.o`, `malloc`, heap linked | no | no |
+| Flash used, Debug / MinSizeRel | 9260 B / 5332 B | 8632 B / 5176 B |
 
-- Each HAL library is compiled once per core (8 objects each).
+- Each HAL library and each kernel is compiled once per core (8 objects
+  each), with that core's CPU flags.
 - The flash LOAD segment is `R E`, not RWX.
-- The first configure clones about 100 MB (CMSIS_6 33 MB, cmsis-device-h7
-  52 MB, HAL 19 MB, including `.git`) and took about 55 s here.
+- The first configure clones about 125 MB (CMSIS_6 33 MB, cmsis-device-h7
+  52 MB, HAL 19 MB, FreeRTOS-Kernel about 22 MB, including `.git`).
 
 ## Toolchain pitfalls
 
@@ -408,6 +460,14 @@ the nosys stubs. `mcu_target_add_runtime()` therefore links with
 calls `_init()` from `crti.o`; empty `_init()` / `_fini()` are provided
 instead.
 
+### `SystemCoreClock` conflicting declaration in C++
+
+A typical `FreeRTOSConfig.h` declares `extern uint32_t SystemCoreClock;` for
+`configCPU_CLOCK_HZ`. Included from C++ (through `FreeRTOS.h`), that
+declaration gets C++ linkage and conflicts with the `extern "C"` declaration
+in ST's `system_stm32h7xx.h`. The example's config wraps it in
+`extern "C"` when `__cplusplus` is defined.
+
 ### Extra ~5 KB in Debug builds with GCC 15
 
 GCC 15 defines `_GLIBCXX_ASSERTIONS` for unoptimized (`-O0`) builds, so
@@ -424,6 +484,9 @@ the checks stay active in Debug, and a failure stops in the debugger.
 - The example has not been run on hardware. It runs on the reset clock and
   has no power supply (`HAL_PWREx_ConfigSupply`), clock tree or HSEM boot
   synchronization between the cores yet.
+- SysTick is shared by the HAL tick and FreeRTOS. ST recommends a basic timer
+  (e.g. TIM6/TIM7) as HAL time base when an RTOS uses SysTick; switch to that
+  once the HAL is used beyond simple GPIO.
 - `stm32h7xx_hal_conf.h` is the unmodified template; set `HSE_VALUE` and
   disable unused modules for the real board.
 - Packages are cloned per build tree (Debug and Release each clone once).
@@ -432,6 +495,5 @@ the checks stay active in Debug, and a failure stops in the debugger.
   yet exercised.
 - Defining the same chip twice is a `FATAL_ERROR`, also when two
   subprojects of one superbuild do it.
-- FreeRTOS: FreeRTOS-Kernel has native CMake support (`FREERTOS_PORT` and a
-  user-provided `freertos_config` target); a `vendors/freertos/kernel.cmake`
-  module can wrap it the same way.
+- FreeRTOS MPU ports and FreeRTOS+ libraries (TCP, CLI, ...) are not
+  covered yet.

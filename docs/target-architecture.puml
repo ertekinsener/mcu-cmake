@@ -25,16 +25,18 @@ package "cmake/mcu (vendor-neutral core)" {
   [mcu::warnings] as WARN
 }
 
-package "cmake/vendors/arm + cmake/vendors/st" {
+package "cmake/vendors/arm + st + freertos" {
   [arm_fetch_cmsis_core()] as FETCHCORE
   [st_fetch_cmsis_device()\nst_add_cmsis_startup()] as ADDSTARTUP
   [st_fetch_hal()\nst_add_hal()] as ADDHAL
+  [freertos_fetch_kernel()\nfreertos_add_kernel()] as ADDRTOS
 }
 
 cloud "Upstream git\n(tags chosen in the example)" {
   [ARM-software/CMSIS_6 v6.1.0] as U_CORE
   [cmsis-device-h7 v1.10.7] as U_DEV
   [stm32h7xx-hal-driver v1.11.6] as U_HAL
+  [FreeRTOS-Kernel V11.3.2] as U_RTOS
 }
 
 package "Header-only targets" {
@@ -49,11 +51,13 @@ package "Chip targets" {
 
 package "examples/h755zi-dual-core" {
   [h755_hal_conf (INTERFACE)\nstm32h7xx_hal_conf.h] as HALCONF
+  [h755_freertos_conf (INTERFACE)\nFreeRTOSConfig.h] as RTOSCONF
   [hal_cm7 (STATIC)\nhal, cortex, rcc, gpio,\nhsem, pwr (+ _ex)] as HAL7
+  [rtos_cm7 (STATIC)\nkernel, port ARM_CM4F,\nHEAP NONE] as RTOS7
   [startup_cm7 (OBJECT)\nstartup_stm32h755xx.s\nsystem_..._dualcore_boot_cm4_cm7.c] as START7
   [firmware_cm7.elf] as FW7
   [firmware_cm7.ld] as LD7
-  [hal_cm4 / startup_cm4 /\nfirmware_cm4.elf\n(same structure)] as CM4SIDE
+  [hal_cm4 / rtos_cm4 / startup_cm4 /\nfirmware_cm4.elf\n(same structure)] as CM4SIDE
 }
 
 ADDCHIP ..> CM7CHIP : creates
@@ -63,6 +67,9 @@ ADDSTARTUP ..> START7 : creates
 FETCHCORE ..> FETCH
 ADDSTARTUP ..> FETCH
 ADDHAL ..> FETCH
+ADDRTOS ..> FETCH
+ADDRTOS ..> RTOS7 : creates
+FETCH ..> U_RTOS
 FETCH ..> U_CORE
 FETCH ..> U_DEV
 FETCH ..> U_HAL
@@ -82,12 +89,16 @@ START7 --> HAL7 : HAL config\nfor system file
 
 FW7 --> START7
 FW7 --> HAL7
+FW7 --> RTOS7
+RTOS7 --> CM7CHIP
+RTOS7 --> RTOSCONF
 FW7 --> CXX
 FW7 --> NANO
 FW7 --> WARN
 
 CM4SIDE --> CM4CHIP
 CM4SIDE --> HALCONF
+CM4SIDE --> RTOSCONF
 
 ADDLD ..> CM7CHIP : reads MCU_MEMORY
 ADDLD ..> LD7 : generates
@@ -97,10 +108,10 @@ OUTPUTS ..> FW7 : bin / hex / map
 TOOLCHAIN -[hidden]down- ADDCHIP
 
 note right of HAL7
-  One HAL library per core: CM7 and CM4
-  need different CPU flags. Every user of
-  the HAL links to the same library, so no
-  HAL object is compiled twice.
+  One HAL library and one FreeRTOS kernel
+  per core: CM7 and CM4 need different CPU
+  flags. Every user links to the same
+  library, so nothing is compiled twice.
 end note
 
 @enduml

@@ -27,6 +27,9 @@ package "github.com/<you>/mcu-cmake (build infra)" as INFRA {
     [cmsis_device.cmake\nst_fetch_cmsis_device()\nst_add_cmsis_startup()] as V_DEV
     [hal.cmake\nst_fetch_hal()\nst_add_hal()] as V_HAL
   }
+  package "cmake/vendors/freertos" {
+    [kernel.cmake\nfreertos_fetch_kernel()\nfreertos_add_kernel()] as V_RTOS
+  }
   package "cmake/vendors/<other> (future)" {
     [e.g. nxp/mcux_sdk.cmake,\nnordic/nrfx.cmake] as V_OTHER
   }
@@ -36,12 +39,13 @@ cloud "Upstream git (unmodified)" as UP {
   [ARM-software/CMSIS_6] as U_CORE
   [STMicroelectronics/cmsis-device-<family>] as U_DEV
   [STMicroelectronics/stm32<family>xx-hal-driver] as U_HAL
+  [FreeRTOS/FreeRTOS-Kernel] as U_RTOS
 }
 
 package "github.com/<you>/firmware-xyz (application)" as APP {
   [CMakeLists.txt\nversions (GIT_TAG)\nmcu_add_chip(...)] as A_CML
   [CMakePresets.json] as A_PRESETS
-  [config/stm32<family>xx_hal_conf.h] as A_CONF
+  [config/stm32<family>xx_hal_conf.h\nconfig/FreeRTOSConfig.h] as A_CONF
   [src/*.cc] as A_SRC
 }
 
@@ -57,6 +61,8 @@ V_HAL --> V_DEV
 I_PKG --> U_CORE : git, shallow
 I_PKG --> U_DEV : git, shallow
 I_PKG --> U_HAL : git, shallow
+V_RTOS ..> I_PKG
+I_PKG --> U_RTOS : git, shallow
 V_OTHER ..> I_PKG
 
 note bottom of APP
