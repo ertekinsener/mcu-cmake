@@ -1,0 +1,70 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+env:
+  # Same compiler as the reference builds in docs/mcu-cmake.md.
+  ARM_GNU_VERSION: 15.2.rel1
+  ARM_GNU_SHA256: 597893282ac8c6ab1a4073977f2362990184599643b4c5ee34870a8215783a16
+
+jobs:
+  tests:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache Arm GNU Toolchain
+        id: toolchain-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/arm-gnu-toolchain
+          key: arm-gnu-toolchain-${{ env.ARM_GNU_VERSION }}-x86_64
+
+      - name: Install Arm GNU Toolchain
+        if: steps.toolchain-cache.outputs.cache-hit != 'true'
+        run: |
+          archive=arm-gnu-toolchain-${ARM_GNU_VERSION}-x86_64-arm-none-eabi.tar.xz
+          curl -fsSL -o "$archive" \
+            "https://developer.arm.com/-/media/Files/downloads/gnu/${ARM_GNU_VERSION}/binrel/${archive}"
+          echo "${ARM_GNU_SHA256}  ${archive}" | sha256sum -c -
+          mkdir -p ~/arm-gnu-toolchain
+          tar -xf "$archive" -C ~/arm-gnu-toolchain --strip-components=1
+
+      - name: Install CMake and Ninja
+        run: |
+          pipx install "cmake>=3.25,<5"
+          pipx install ninja
+          echo "$HOME/arm-gnu-toolchain/bin" >> "$GITHUB_PATH"
+
+      - name: Versions
+        run: |
+          cmake --version | head -1
+          ninja --version
+          arm-none-eabi-gcc --version | head -1
+
+      - name: Configure tests
+        run: cmake -S tests -B build/tests -G Ninja
+
+      - name: Error handling tests (offline)
+        run: ctest --test-dir build/tests -L errors -j4 --output-on-failure
+
+      - name: Example builds, warnings as errors
+        run: ctest --test-dir build/tests -L build -j2 --output-on-failure
+
+  sysview-bridge:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install libudev
+        run: sudo apt-get update && sudo apt-get install -y libudev-dev
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            tools/sysview-bridge/target
+          key: cargo-${{ hashFiles('tools/sysview-bridge/Cargo.lock') }}
+      - name: Build
+        run: cargo build --release --locked --manifest-path tools/sysview-bridge/Cargo.toml

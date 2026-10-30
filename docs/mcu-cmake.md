@@ -41,6 +41,7 @@ Diagrams:
 | [cmake/mcu/git_sparse_fetch.cmake](../cmake/mcu/git_sparse_fetch.cmake) | Sparse partial clone script used by `mcu_fetch_package(SPARSE_PATHS ...)` |
 | [cmake/mcu/runtime.cmake](../cmake/mcu/runtime.cmake) | `mcu_target_add_runtime()` and [runtime/](../cmake/mcu/runtime) sources |
 | [cmake/mcu/outputs.cmake](../cmake/mcu/outputs.cmake) | `mcu_add_firmware_outputs()` |
+| [cmake/mcu/flash.cmake](../cmake/mcu/flash.cmake) | `mcu_add_flash_target()` (probe-rs) |
 | [cmake/mcu/support_targets.cmake](../cmake/mcu/support_targets.cmake) | `mcu::cxx_bare_metal`, `mcu::newlib_nano`, `mcu::warnings` |
 | [cmake/vendors/arm/cmsis_core.cmake](../cmake/vendors/arm/cmsis_core.cmake) | `arm_fetch_cmsis_core()` |
 | [cmake/vendors/st/cmsis_device.cmake](../cmake/vendors/st/cmsis_device.cmake) | `st_fetch_cmsis_device()`, `st_add_cmsis_startup()` |
@@ -56,6 +57,8 @@ Diagrams:
 | [cmake/vendors/segger/rtt.cmake](../cmake/vendors/segger/rtt.cmake) | `segger_fetch_rtt()`, `segger_add_rtt()` |
 | [cmake/vendors/segger/systemview.cmake](../cmake/vendors/segger/systemview.cmake) | `segger_fetch_systemview()`, `segger_add_systemview()`; ThreadX hooks in [systemview/](../cmake/vendors/segger/systemview) |
 | [tools/sysview-bridge](../tools/sysview-bridge) | Host tool: SystemView over probe-rs (IP recorder bridge, headless recording) |
+| [tests/](../tests) | CTest suite: error handling, example builds, on-board smoke tests ([Tests and CI](#tests-and-ci)) |
+| [.github/workflows/ci.yml](../.github/workflows/ci.yml) | CI: error tests, example builds, sysview-bridge build |
 
 Requirements: CMake 3.25+, git, arm-none-eabi-gcc with newlib-nano,
 binutils 2.38+ (for `READONLY` in the linker script).
@@ -293,6 +296,30 @@ mcu_add_firmware_outputs(<target> [BIN] [HEX] [MAP] [MEMORY_USAGE] [SIZE])
 
 Adds post-build `.bin` / `.hex` generation, a linker map file, the linker's
 per-region usage report, and `arm-none-eabi-size` output.
+
+### `mcu_add_flash_target()`
+
+```
+mcu_add_flash_target(<name>
+  FIRMWARE <target>...
+  PROBE_RS_CHIP <probe-rs chip name>
+  [PROBE <VID:PID[:SERIAL]>]
+  [VERIFY]
+  [NO_RESET])
+```
+
+- Custom target `<name>` (`cmake --build <tree> --target <name>`) that builds
+  the images, downloads each with `probe-rs download` in the given order and
+  then resets the chip once (`probe-rs reset`), so all cores of a multi-core
+  part start together. Several images also cover bootloader + application.
+- probe-rs is vendor-neutral (CMSIS-DAP, ST-LINK, J-Link, ... probes; chips
+  of many vendors): `PROBE_RS_CHIP` is its chip name (`probe-rs chip list`),
+  independent of the `mcu_add_chip()` name.
+- probe-rs is looked up at configure time (`MCU_PROBE_RS_EXECUTABLE`).
+  Without it, configuring still works and the target fails with an install
+  hint when it is run, so CI machines without probe-rs are not affected.
+- probe-rs needs the probe for itself: stop a running `sysview-bridge` or
+  debugger first ("interface is busy").
 
 ### Support targets
 
@@ -588,7 +615,8 @@ tools/sysview-bridge/target/release/sysview-bridge --chip STM32H755ZITx \
   application: it sends the start command, saves the raw stream to
   `<dir>/core<N>.bin` and prints the strings found in it (system
   description, task, module and marker names), for checks on a headless
-  machine.
+  machine. The RTT channel 0 log of the same time span, including what the
+  target had buffered before, goes to `<dir>/core<N>.log`.
 - probe-rs holds the probe while the bridge runs; stop it before flashing.
 
 ### Vendor module errors
@@ -870,6 +898,37 @@ USBX without dependencies (832 objects, no CDC-ECM / host storage) and with
   LevelX (1.2 MB), NetX Duo (30 MB), USBX (14 MB) and GUIX (21 MB); about
   42 s.
 
+## Tests and CI
+
+[tests/](../tests) is a host CMake project that registers CTest tests; it
+uses the cross toolchain only inside the tests.
+
+```
+cmake -S tests -B build/tests -G Ninja
+ctest --test-dir build/tests -L errors -j8           # offline, seconds
+ctest --test-dir build/tests -L build -j2            # all examples, minutes
+cmake build/tests -DMCU_HARDWARE_TESTS=ON
+ctest --test-dir build/tests -L hardware             # board connected
+```
+
+| Label | Tests | What they check |
+|---|---|---|
+| `errors` | 26 | Configure-only runs of [tests/errors](../tests/errors): one valid project (`errors.ok`) and 25 misuses of the core and the SEGGER modules, each matched against its `FATAL_ERROR` text. Offline: the vendor packages are fake trees passed through `FETCHCONTENT_SOURCE_DIR_<NAME>`. |
+| `build` | 6 | Each example in Debug and MinSizeRel with `CMAKE_COMPILE_WARNING_AS_ERROR` and `-Wl,--fatal-warnings` (test trees only); the output is also scanned for `warning:`. MinSizeRel reuses all packages of its Debug tree. |
+| `hardware` | 1 + 3 | Builds sysview-bridge, then per example ([smoke.py](../tests/hardware/smoke.py)): `flash` target, a 3 s `sysview-bridge --record` of both cores, and checks of the SystemView stream and RTT log (system description, task names, RTT start / blink lines, the ThreadX middleware summary, no overrun warning in the SystemView example). One board: `RESOURCE_LOCK`. |
+
+- `CMAKE_LINK_WARNING_AS_ERROR` does not work with this toolchain file: it
+  detects the compiler without linking, so CMake does not know the linker
+  and adds no flag. The build tests pass `-Wl,--fatal-warnings` instead.
+- `MCU_TEST_DEPS_FROM=<dir>` lets the Debug builds take already fetched
+  `*-src` package trees (e.g. `examples/h755zi-threadx/build/debug/_deps`)
+  instead of cloning.
+- The hardware tests use the Debug trees of the build tests and need
+  probe-rs, Python 3.9+ and a NUCLEO-H755ZI-Q (any probe-rs probe).
+- [CI](../.github/workflows/ci.yml) (GitHub Actions, Ubuntu 24.04) installs
+  the Arm GNU Toolchain 15.2.rel1 (checksum verified, cached), CMake and
+  Ninja, runs the `errors` and `build` tests, and builds sysview-bridge.
+
 ## Toolchain pitfalls
 
 ### RWX LOAD segment warning
@@ -951,9 +1010,10 @@ the checks stay active in Debug, and a failure stops in the debugger.
   non-sparse path (full clone) is not exercised.
 - Defining the same chip twice is a `FATAL_ERROR`, also when two
   subprojects of one superbuild do it.
-- RTT channel 0 has been watched on the CM7 only; `probe-rs attach` on the
-  CM4 runs into the same memory map gap as above (needs a custom chip
-  description with the `0x10000000` alias).
+- `probe-rs attach` cannot show the CM4's RTT log: its STM32H755 memory map
+  lacks the `0x10000000` alias (would need a custom chip description). The
+  CM4 log is read through `sysview-bridge --ram ... --record` instead, as
+  the hardware tests do.
 - Not covered yet: FreeRTOS MPU ports, FreeRTOS+ libraries (TCP, CLI, ...),
   ThreadX SMP / module ports, NetX Duo `azure_iot`, TSN and utilities.
 - The ThreadX middleware runs with RAM-backed drivers only. Real drivers

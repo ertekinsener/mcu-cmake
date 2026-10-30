@@ -11,6 +11,7 @@
 #   h755_system       system file name for st_add_cmsis_startup()
 #   h755_sysview_sources  SystemView board setup (sysview_h755.cc); needs
 #                     SEGGER SystemView on the image
+#   h755_probe_rs_chip  probe-rs chip name for mcu_add_flash_target()
 
 # STM32H755ZI memory map, from RM0399 (STM32H745/755/747/757) "Memory map".
 # Verify against the current reference manual before changing.
@@ -64,3 +65,6 @@ set(h755_system system_stm32h7xx_dualcore_boot_cm4_cm7.c)
 # SystemView setup per core (cycle counter, device name, RAM base); see
 # sysview_h755.h.
 set(h755_sysview_sources "${CMAKE_CURRENT_LIST_DIR}/sysview_h755.cc")
+
+# probe-rs name of the part (package LQFP144 = "Tx"), for mcu_add_flash_target().
+set(h755_probe_rs_chip STM32H755ZITx)

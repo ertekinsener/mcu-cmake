@@ -13,7 +13,8 @@
 //!
 //! --record captures a fixed time span without the SystemView application and
 //! prints the strings found in the stream (system description, task and module
-//! names), which is enough to check an image on a headless machine.
+//! names), which is enough to check an image on a headless machine. It also
+//! saves what the target logged on RTT up channel 0 meanwhile (core<N>.log).
 
 use std::fs;
 use std::io::{ErrorKind, Read, Write};
@@ -67,7 +68,8 @@ struct Args {
     port: u16,
 
     /// Record into this directory instead of serving SystemView
-    /// (<dir>/core<N>.bin, the raw SystemView stream).
+    /// (<dir>/core<N>.bin, the raw SystemView stream; <dir>/core<N>.log, the
+    /// RTT channel 0 text, including what was buffered before).
     #[arg(long, value_name = "DIR")]
     record: Option<PathBuf>,
 
@@ -82,6 +84,9 @@ struct Target {
     rtt: Rtt,
     channel: usize,
 }
+
+/// RTT up channel 0 carries the text log unless SystemView took it.
+const LOG_CHANNEL: usize = 0;
 
 impl Target {
     fn attach(session: &mut Session, spec: &str) -> Result<Self> {
@@ -133,6 +138,18 @@ impl Target {
             }
         }
         Ok(())
+    }
+
+    /// Reads the log channel; 0 bytes if there is none.
+    fn read_log(&mut self, session: &mut Session, buf: &mut [u8]) -> Result<usize> {
+        if self.channel == LOG_CHANNEL {
+            return Ok(0);
+        }
+        let mut core = session.core(self.core_index)?;
+        match self.rtt.up_channel(LOG_CHANNEL) {
+            Some(channel) => Ok(channel.read(&mut core, buf)?),
+            None => Ok(0),
+        }
     }
 
     /// Discards data left over from an earlier session.
@@ -312,6 +329,7 @@ fn relay(session: &mut Session, target: &mut Target, connection: &mut Connection
 fn record(session: &mut Session, targets: &mut [Target], dir: &Path, duration: Duration) -> Result<()> {
     fs::create_dir_all(dir)?;
     let mut streams: Vec<Vec<u8>> = targets.iter().map(|_| Vec::new()).collect();
+    let mut logs: Vec<Vec<u8>> = targets.iter().map(|_| Vec::new()).collect();
     for target in targets.iter_mut() {
         target.drain(session)?;
         target.write_all(session, &[COMMAND_START])?;
@@ -329,19 +347,22 @@ fn record(session: &mut Session, targets: &mut [Target], dir: &Path, duration: D
             stopped = true;
         }
         let mut busy = false;
-        for (target, stream) in targets.iter_mut().zip(streams.iter_mut()) {
+        for ((target, stream), log) in targets.iter_mut().zip(streams.iter_mut()).zip(logs.iter_mut()) {
             let count = target.read(session, &mut buf)?;
             stream.extend_from_slice(&buf[..count]);
             busy |= count > 0;
+            let count = target.read_log(session, &mut buf)?;
+            log.extend_from_slice(&buf[..count]);
         }
         if !busy {
             thread::sleep(Duration::from_millis(1));
         }
     }
 
-    for (target, stream) in targets.iter().zip(streams.iter()) {
+    for ((target, stream), log) in targets.iter().zip(streams.iter()).zip(logs.iter()) {
         let path = dir.join(format!("core{}.bin", target.core_index));
         fs::write(&path, stream)?;
+        fs::write(dir.join(format!("core{}.log", target.core_index)), log)?;
         println!(
             "core {}: {} bytes in {:.1} s ({:.1} KiB/s) -> {}",
             target.core_index,
@@ -351,6 +372,7 @@ fn record(session: &mut Session, targets: &mut [Target], dir: &Path, duration: D
             path.display()
         );
         println!("  strings: {}", strings(stream, 4).join(" | "));
+        println!("  log: {} bytes", log.len());
     }
     Ok(())
 }

@@ -96,3 +96,10 @@ mcu_add_linker_script(firmware_cm4
 foreach(core cm7 cm4)
   mcu_add_firmware_outputs(firmware_${core} BIN HEX MAP MEMORY_USAGE)
 endforeach()
+
+# Flash both images, then reset once so both cores start together:
+#   cmake --build --preset debug --target flash
+mcu_add_flash_target(flash
+  FIRMWARE firmware_cm7 firmware_cm4
+  PROBE_RS_CHIP ${h755_probe_rs_chip}
+)
