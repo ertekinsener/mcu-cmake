@@ -1,8 +1,8 @@
 # Toolchain file for GNU Arm Embedded (arm-none-eabi-gcc).
 #
 # Only locates the compiler and binutils. CPU/FPU flags live on the chip
-# targets created by stm32_add_chip(), so one build tree can hold firmware
-# for several cores (e.g. STM32H755 CM7 + CM4).
+# targets created by mcu_add_chip(), so one build tree can hold firmware
+# for several cores (e.g. a dual-core CM7 + CM4 part).
 #
 # Optional: ARM_TOOLCHAIN_PATH (CMake or environment variable) pointing to the
 # toolchain root, i.e. the directory that contains bin/arm-none-eabi-gcc.

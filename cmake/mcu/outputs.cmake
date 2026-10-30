@@ -1,6 +1,6 @@
-# stm32_add_firmware_outputs(): post-build artifacts for a firmware ELF.
+# mcu_add_firmware_outputs(): post-build artifacts for a firmware ELF.
 #
-#   stm32_add_firmware_outputs(<target>
+#   mcu_add_firmware_outputs(<target>
 #     [BIN]           # <name>.bin next to the ELF
 #     [HEX]           # <name>.hex next to the ELF
 #     [MAP]           # <name>.map linker map file
@@ -9,9 +9,9 @@
 
 include_guard(GLOBAL)
 
-function(stm32_add_firmware_outputs target)
+function(mcu_add_firmware_outputs target)
   cmake_parse_arguments(PARSE_ARGV 1 arg "BIN;HEX;MAP;MEMORY_USAGE;SIZE" "" "")
-  set(context "stm32_add_firmware_outputs(${target})")
+  set(context "mcu_add_firmware_outputs(${target})")
 
   if(arg_UNPARSED_ARGUMENTS)
     message(FATAL_ERROR "${context}: unexpected arguments: ${arg_UNPARSED_ARGUMENTS}")

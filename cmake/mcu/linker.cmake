@@ -1,7 +1,7 @@
-# stm32_add_linker_script(): generate a linker script from a chip's memory map.
+# mcu_add_linker_script(): generate a linker script from a chip's memory map.
 #
-#   stm32_add_linker_script(<target>
-#     CHIP <chip target>        # e.g. stm32::H755ZI::CM7
+#   mcu_add_linker_script(<target>
+#     CHIP <chip target>        # e.g. mcu::H755ZI::CM7
 #     FLASH_REGION <region>     # code, read-only data, .data load image
 #     RAM_REGION <region>       # .data, .bss, heap and stack
 #     STACK_SIZE <bytes>        # minimum stack, e.g. 0x2000
@@ -16,10 +16,10 @@
 
 include_guard(GLOBAL)
 
-function(stm32_add_linker_script target)
+function(mcu_add_linker_script target)
   cmake_parse_arguments(PARSE_ARGV 1 arg ""
     "CHIP;FLASH_REGION;RAM_REGION;STACK_SIZE;HEAP_SIZE;TEMPLATE" "")
-  set(context "stm32_add_linker_script(${target})")
+  set(context "mcu_add_linker_script(${target})")
 
   if(arg_UNPARSED_ARGUMENTS)
     message(FATAL_ERROR "${context}: unexpected arguments: ${arg_UNPARSED_ARGUMENTS}")
@@ -40,14 +40,14 @@ function(stm32_add_linker_script target)
 
   if(NOT TARGET ${arg_CHIP})
     message(FATAL_ERROR
-      "${context}: unknown chip '${arg_CHIP}'. Call stm32_add_chip() first.")
+      "${context}: unknown chip '${arg_CHIP}'. Call mcu_add_chip() first.")
   endif()
-  get_target_property(memory ${arg_CHIP} STM32_MEMORY)
+  get_target_property(memory ${arg_CHIP} MCU_MEMORY)
   if(NOT memory)
-    message(FATAL_ERROR "${context}: ${arg_CHIP} was not created by stm32_add_chip()")
+    message(FATAL_ERROR "${context}: ${arg_CHIP} was not created by mcu_add_chip()")
   endif()
-  get_target_property(chip ${arg_CHIP} STM32_CHIP)
-  get_target_property(core ${arg_CHIP} STM32_CORE)
+  get_target_property(chip ${arg_CHIP} MCU_CHIP)
+  get_target_property(core ${arg_CHIP} MCU_CORE)
 
   # Build the MEMORY block and the NOLOAD sections for the extra regions.
   set(memory_block "")
@@ -96,7 +96,7 @@ function(stm32_add_linker_script target)
   if(arg_TEMPLATE)
     get_filename_component(template "${arg_TEMPLATE}" ABSOLUTE)
   else()
-    get_property(module_dir GLOBAL PROPERTY STM32_MODULE_DIR)
+    get_property(module_dir GLOBAL PROPERTY MCU_MODULE_DIR)
     set(template "${module_dir}/linker/default.ld.in")
   endif()
   if(NOT EXISTS "${template}")
@@ -104,18 +104,18 @@ function(stm32_add_linker_script target)
   endif()
 
   # Variables consumed by the template.
-  set(STM32_LD_TARGET "${target}")
+  set(MCU_LD_TARGET "${target}")
   if(core)
-    set(STM32_LD_CHIP "${chip} ${core}")
+    set(MCU_LD_CHIP "${chip} ${core}")
   else()
-    set(STM32_LD_CHIP "${chip}")
+    set(MCU_LD_CHIP "${chip}")
   endif()
-  set(STM32_LD_MEMORY "${memory_block}")
-  set(STM32_LD_EXTRA_SECTIONS "${extra_sections}")
-  set(STM32_LD_FLASH "${arg_FLASH_REGION}")
-  set(STM32_LD_RAM "${arg_RAM_REGION}")
-  set(STM32_LD_STACK_SIZE "${arg_STACK_SIZE}")
-  set(STM32_LD_HEAP_SIZE "${arg_HEAP_SIZE}")
+  set(MCU_LD_MEMORY "${memory_block}")
+  set(MCU_LD_EXTRA_SECTIONS "${extra_sections}")
+  set(MCU_LD_FLASH "${arg_FLASH_REGION}")
+  set(MCU_LD_RAM "${arg_RAM_REGION}")
+  set(MCU_LD_STACK_SIZE "${arg_STACK_SIZE}")
+  set(MCU_LD_HEAP_SIZE "${arg_HEAP_SIZE}")
 
   get_target_property(binary_dir ${target} BINARY_DIR)
   set(script "${binary_dir}/${target}.ld")

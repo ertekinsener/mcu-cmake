@@ -1,47 +1,69 @@
 @startuml repo-structure
-' Proposed repository layout: one build-infra repo, vendor code pulled
-' from upstream by pinned tag via FetchContent (no forks unless patched).
+' Repository layout of mcu-cmake: a vendor-neutral core, one file per vendor
+' package, and vendor code fetched from upstream git at versions chosen by
+' the application.
 
-title Proposed repository / dependency structure
+title mcu-cmake repository / dependency structure
 
 skinparam componentStyle rectangle
 skinparam packageStyle folder
 
-cloud "Upstream (unmodified, pinned tags)" as UP {
-  [ARM-software/CMSIS_6\n(CMSIS core headers)] as U_CMSIS
-  [STMicroelectronics/cmsis-device-h7] as U_DEV
-  [STMicroelectronics/stm32h7xx-hal-driver] as U_HAL
-  [FreeRTOS/FreeRTOS-Kernel\n(has its own CMakeLists)] as U_RTOS
+package "github.com/<you>/mcu-cmake (build infra)" as INFRA {
+  package "cmake/toolchain" {
+    [arm-none-eabi-gcc.cmake] as I_TC
+  }
+  package "cmake/mcu (vendor-neutral core)" {
+    [chip.cmake\nmcu_add_chip()] as I_CHIP
+    [arch/arm.cmake\nCortex-M flags] as I_ARCH
+    [linker.cmake + linker/default.ld.in] as I_LD
+    [package.cmake\nmcu_fetch_package()\ngit, no pinned versions] as I_PKG
+    [runtime.cmake + runtime/] as I_RT
+    [outputs.cmake, support_targets.cmake] as I_MISC
+  }
+  package "cmake/vendors/arm" {
+    [cmsis_core.cmake\narm_fetch_cmsis_core()] as V_CORE
+  }
+  package "cmake/vendors/st" {
+    [cmsis_device.cmake\nst_fetch_cmsis_device()\nst_add_cmsis_startup()] as V_DEV
+    [hal.cmake\nst_fetch_hal()\nst_add_hal()] as V_HAL
+  }
+  package "cmake/vendors/<other> (future)" {
+    [e.g. nxp/mcux_sdk.cmake,\nnordic/nrfx.cmake] as V_OTHER
+  }
 }
 
-package "github.com/<you>/stm32-cmake (build infra)" as INFRA {
-  [cmake/toolchain/arm-none-eabi-gcc.cmake] as I_TC
-  [cmake/stm32/chip.cmake\nstm32_add_chip(...)\nno device database] as I_CHIPS
-  [cmake/stm32/linker/default.ld.in] as I_LD
-  [cmake/vendor/cmsis.cmake\ncmake/vendor/stm32_hal.cmake\ncmake/vendor/freertos.cmake\n(planned)] as I_VENDOR
-  [cmake/stm32Config.cmake\n(package config)] as I_CFG
+cloud "Upstream git (unmodified)" as UP {
+  [ARM-software/CMSIS_6] as U_CORE
+  [STMicroelectronics/cmsis-device-<family>] as U_DEV
+  [STMicroelectronics/stm32<family>xx-hal-driver] as U_HAL
 }
 
 package "github.com/<you>/firmware-xyz (application)" as APP {
-  [CMakeLists.txt\nFetchContent(stm32-cmake)\nstm32_add_chip(H755ZI CORE CM7/CM4 ...)] as A_CML
+  [CMakeLists.txt\nversions (GIT_TAG)\nmcu_add_chip(...)] as A_CML
   [CMakePresets.json] as A_PRESETS
-  [config/stm32h7xx_hal_conf.h\nconfig/FreeRTOSConfig.h] as A_CONF
+  [config/stm32<family>xx_hal_conf.h] as A_CONF
   [src/*.cc] as A_SRC
 }
 
-A_CML --> INFRA : FetchContent / find_package(stm32 CONFIG)
+A_CML --> INFRA : FetchContent / add_subdirectory
 A_PRESETS ..> I_TC : toolchainFile
-I_VENDOR --> U_CMSIS : FetchContent GIT_TAG <pinned>
-I_VENDOR --> U_DEV : FetchContent GIT_TAG <pinned>
-I_VENDOR --> U_HAL : FetchContent GIT_TAG <pinned>
-I_VENDOR --> U_RTOS : add_subdirectory (native CMake)
-I_CFG ..> I_CHIPS
-I_CFG ..> I_VENDOR
+I_CHIP ..> I_ARCH : ARCH handler
+V_CORE ..> I_PKG
+V_DEV ..> I_PKG
+V_HAL ..> I_PKG
+V_DEV ..> I_RT
+V_DEV --> V_CORE
+V_HAL --> V_DEV
+I_PKG --> U_CORE : git, shallow
+I_PKG --> U_DEV : git, shallow
+I_PKG --> U_HAL : git, shallow
+V_OTHER ..> I_PKG
 
-note bottom of UP
-  Fork a vendor repo only if you must patch it.
-  Otherwise keep the wrapper logic (CMake) in the
-  infra repo and reference upstream by tag.
+note bottom of APP
+  Changing the MCU model: new mcu_add_chip() values,
+  FAMILY and package versions; the core is untouched.
+  Changing the vendor: another vendors/<vendor> module;
+  chip, linker, outputs and runtime stay the same.
 end note
 
 @enduml
