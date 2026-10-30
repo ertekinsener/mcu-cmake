@@ -5,6 +5,7 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../../cmake")
 include(mcu)
 include(vendors/st/hal)
 include(vendors/segger/rtt)
+include(vendors/segger/systemview)
 include(vendors/freertos/kernel)
 
 # Vendor package versions are chosen here, not in the module. Override on the
@@ -24,16 +25,21 @@ endif()
 if(NOT DEFINED SEGGER_RTT_VERSION)
   set(SEGGER_RTT_VERSION V8.58.0)
 endif()
+if(NOT DEFINED SEGGER_SYSTEMVIEW_VERSION)
+  set(SEGGER_SYSTEMVIEW_VERSION V4.12.0)
+endif()
 
 arm_fetch_cmsis_core(GIT_TAG ${CMSIS_CORE_VERSION})
 st_fetch_cmsis_device(FAMILY H7 GIT_TAG ${ST_CMSIS_DEVICE_H7_VERSION})
 st_fetch_hal(FAMILY H7 GIT_TAG ${ST_HAL_H7_VERSION})
 freertos_fetch_kernel(GIT_TAG ${FREERTOS_KERNEL_VERSION})
 segger_fetch_rtt(GIT_TAG ${SEGGER_RTT_VERSION})
+segger_fetch_systemview(GIT_TAG ${SEGGER_SYSTEMVIEW_VERSION})
 
 include("${CMAKE_CURRENT_SOURCE_DIR}/../common/stm32h755zi/stm32h755zi.cmake")
 
-# FreeRTOS configuration shared by both cores (FreeRTOSConfig.h).
+# FreeRTOS configuration shared by both cores (FreeRTOSConfig.h, which pulls
+# in the SystemView trace macros).
 mcu_add_named_library(h755::freertos_conf INTERFACE freertos_conf_target)
 target_include_directories(${freertos_conf_target} INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}/common")
 
@@ -68,13 +74,22 @@ freertos_add_kernel(h755::rtos_cm7
 # cached, so the probe sees writes immediately.
 segger_add_rtt(h755::rtt_cm7 CHIP stm32::H755ZI::CM7 PRINTF)
 
-add_executable(firmware_cm7 cm7/main.cc common/rtos_glue.cc)
+# SystemView records into its own RTT channel ("SysView", 1 KiB, also in
+# .bss). The FreeRTOS kernel is linked against it for the trace hooks.
+segger_add_systemview(h755::sysview_cm7
+  RTT h755::rtt_cm7
+  OS FreeRTOSV11
+  OS_TARGET h755::rtos_cm7
+)
+
+add_executable(firmware_cm7 cm7/main.cc common/rtos_glue.cc ${h755_sysview_sources})
 target_compile_features(firmware_cm7 PRIVATE cxx_std_23)
 target_link_libraries(firmware_cm7 PRIVATE
   h755::startup_cm7
   h755::hal_cm7
   h755::rtos_cm7
   h755::rtt_cm7
+  h755::sysview_cm7
   h755::common
   mcu::cxx_bare_metal
   mcu::newlib_nano
@@ -113,13 +128,20 @@ freertos_add_kernel(h755::rtos_cm4
 # no data cache.
 segger_add_rtt(h755::rtt_cm4 CHIP stm32::H755ZI::CM4 PRINTF)
 
-add_executable(firmware_cm4 cm4/main.cc common/rtos_glue.cc)
+segger_add_systemview(h755::sysview_cm4
+  RTT h755::rtt_cm4
+  OS FreeRTOSV11
+  OS_TARGET h755::rtos_cm4
+)
+
+add_executable(firmware_cm4 cm4/main.cc common/rtos_glue.cc ${h755_sysview_sources})
 target_compile_features(firmware_cm4 PRIVATE cxx_std_23)
 target_link_libraries(firmware_cm4 PRIVATE
   h755::startup_cm4
   h755::hal_cm4
   h755::rtos_cm4
   h755::rtt_cm4
+  h755::sysview_cm4
   h755::common
   mcu::cxx_bare_metal
   mcu::newlib_nano

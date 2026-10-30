@@ -9,6 +9,8 @@
 #   h755::common      INTERFACE, shared headers (shared_mailbox.h)
 #   h755_startup      startup file name for st_add_cmsis_startup()
 #   h755_system       system file name for st_add_cmsis_startup()
+#   h755_sysview_sources  SystemView board setup (sysview_h755.cc); needs
+#                     SEGGER SystemView on the image
 
 # STM32H755ZI memory map, from RM0399 (STM32H745/755/747/757) "Memory map".
 # Verify against the current reference manual before changing.
@@ -58,3 +60,7 @@ target_include_directories(${h755_common_target} INTERFACE "${CMAKE_CURRENT_LIST
 # dualcore_boot_cm4_cm7 system file. startup_stm32h755xx.s serves both cores.
 set(h755_startup startup_stm32h755xx.s)
 set(h755_system system_stm32h7xx_dualcore_boot_cm4_cm7.c)
+
+# SystemView setup per core (cycle counter, device name, RAM base); see
+# sysview_h755.h.
+set(h755_sysview_sources "${CMAKE_CURRENT_LIST_DIR}/sysview_h755.cc")

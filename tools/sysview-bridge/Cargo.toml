@@ -1,0 +1,12 @@
+[package]
+name = "sysview-bridge"
+version = "0.1.0"
+edition = "2024"
+description = "SEGGER SystemView IP recorder bridge over probe-rs RTT"
+publish = false
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+object = { version = "0.37", default-features = false, features = ["read", "elf", "std"] }
+probe-rs = "0.32"

@@ -77,10 +77,20 @@ extern uint32_t SystemCoreClock;
 #define INCLUDE_xTaskDelayUntil                   1
 #define INCLUDE_xTaskGetSchedulerState            1
 #define INCLUDE_vTaskSuspend                      1
+// SystemView: tells the idle task apart (trace macros) and reports the stack
+// high-water mark in the task list.
+#define INCLUDE_xTaskGetIdleTaskHandle            1
+#define INCLUDE_uxTaskGetStackHighWaterMark       1
 
 // Port handlers under their CMSIS vector names. SysTick_Handler is defined in
 // rtos_glue.cc because it also drives the HAL tick.
 #define vPortSVCHandler     SVC_Handler
 #define xPortPendSVHandler  PendSV_Handler
+
+// SEGGER SystemView trace macros (traceTASK_SWITCHED_IN, traceISR_ENTER, ...).
+// Must come last: the header tests the INCLUDE_ and config values above.
+#if !defined(__ASSEMBLER__)
+#include "SEGGER_SYSVIEW_FreeRTOS.h"
+#endif
 
 #endif  // EXAMPLES_H755ZI_FREERTOS_COMMON_FREERTOSCONFIG_H_

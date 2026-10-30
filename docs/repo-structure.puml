@@ -38,6 +38,10 @@ package "github.com/<you>/mcu-cmake (build infra)" as INFRA {
   }
   package "cmake/vendors/segger" {
     [rtt.cmake\nsegger_fetch_rtt()\nsegger_add_rtt()] as V_RTT
+    [systemview.cmake\nsegger_fetch_systemview()\nsegger_add_systemview(RTT, OS)\n+ systemview/ ThreadX hooks] as V_SV
+  }
+  package "tools" {
+    [sysview-bridge (Rust, probe-rs)\nRTT "SysView" channel <-> TCP 19111\nSystemView IP recorder] as T_BRIDGE
   }
   package "cmake/vendors/<other> (future)" {
     [e.g. nxp/mcux_sdk.cmake,\nnordic/nrfx.cmake] as V_OTHER
@@ -52,6 +56,7 @@ cloud "Upstream git (unmodified)" as UP {
   [eclipse-threadx/threadx] as U_TX
   [eclipse-threadx/filex, levelx,\nnetxduo, usbx, guix] as U_TXMW
   [SEGGERMicro/RTT] as U_RTT
+  [SEGGERMicro/SystemView] as U_SV
 }
 
 package "github.com/<you>/firmware-xyz (application)" as APP {
@@ -83,6 +88,12 @@ I_PKG --> U_TX : git, sparse
 I_PKG --> U_TXMW : git, sparse
 V_RTT ..> I_PKG
 I_PKG --> U_RTT : git, sparse
+V_SV ..> I_PKG
+V_SV ..> V_RTT : RTT target
+V_SV ..> V_RTOS : OS_TARGET
+V_SV ..> V_TX : OS_TARGET
+I_PKG --> U_SV : git, sparse
+T_BRIDGE ..> V_SV : host side of\nthe SysView channel
 V_OTHER ..> I_PKG
 
 note bottom of APP

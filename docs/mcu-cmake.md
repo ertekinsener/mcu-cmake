@@ -1,7 +1,8 @@
 # mcu-cmake
 
 A small, target-based CMake module for bare-metal MCU firmware. The core is
-vendor-neutral; vendor packages (CMSIS, HAL, FreeRTOS, ThreadX, SEGGER RTT, ...) live in separate modules,
+vendor-neutral; vendor packages (CMSIS, HAL, FreeRTOS, ThreadX, SEGGER RTT and
+SystemView, ...) live in separate modules,
 one file per package, and are fetched from upstream git at versions chosen by
 the project.
 
@@ -12,9 +13,10 @@ the project.
 - Changing the MCU model or vendor changes the chip description and the
   vendor modules in the project, not the core.
 
-Exercised with the STM32H755ZI (dual core, Cortex-M7 + Cortex-M4) in two
-examples, [examples/h755zi-freertos](../examples/h755zi-freertos) and
-[examples/h755zi-threadx](../examples/h755zi-threadx), and with an
+Exercised with the STM32H755ZI (dual core, Cortex-M7 + Cortex-M4) in three
+examples, [examples/h755zi-freertos](../examples/h755zi-freertos),
+[examples/h755zi-threadx](../examples/h755zi-threadx) and
+[examples/h755zi-systemview](../examples/h755zi-systemview), and with an
 STM32F411CE build as a portability check (see
 [Portability](#portability)).
 
@@ -52,6 +54,8 @@ Diagrams:
 | [cmake/vendors/threadx/guix.cmake](../cmake/vendors/threadx/guix.cmake) | `threadx_fetch_guix()`, `threadx_add_guix()` |
 | [cmake/vendors/threadx/common.cmake](../cmake/vendors/threadx/common.cmake) | Shared helpers of the ThreadX modules |
 | [cmake/vendors/segger/rtt.cmake](../cmake/vendors/segger/rtt.cmake) | `segger_fetch_rtt()`, `segger_add_rtt()` |
+| [cmake/vendors/segger/systemview.cmake](../cmake/vendors/segger/systemview.cmake) | `segger_fetch_systemview()`, `segger_add_systemview()`; ThreadX hooks in [systemview/](../cmake/vendors/segger/systemview) |
+| [tools/sysview-bridge](../tools/sysview-bridge) | Host tool: SystemView over probe-rs (IP recorder bridge, headless recording) |
 
 Requirements: CMake 3.25+, git, arm-none-eabi-gcc with newlib-nano,
 binutils 2.38+ (for `READONLY` in the linker script).
@@ -504,14 +508,100 @@ segger_add_rtt(<name>
   non-cacheable memory (or use `SEGGER_RTT_CPU_CACHE_LINE_SIZE` /
   `SEGGER_RTT_UNCACHED_OFF`), since the probe reads RAM directly.
 
+### SEGGER: `vendors/segger/systemview`
+
+```
+segger_fetch_systemview(GIT_TAG <tag|commit> [GIT_REPOSITORY <url>])
+
+segger_add_systemview(<name>
+  RTT <rtt target>
+  [CONFIG <target>]
+  [OS <FreeRTOSV11|ThreadX|...> OS_TARGET <rtos target>])
+```
+
+- Default repository: `SEGGERMicro/SystemView` (tags such as `V4.12.0`).
+  Sparse fetch of `SEGGER`, `SYSVIEW`, `Config` and `Sample`.
+- Creates a **STATIC** library with the SystemView core, built with the chip
+  flags of the RTT target it links. SystemView records into its own RTT up /
+  down channel pair named `SysView` (allocated at init, channel 1 with the
+  default RTT configuration).
+- `CONFIG` provides the project's `SEGGER_SYSVIEW_Conf.h` (the package's
+  `Config/` is then not on the include path). `Config/` also holds
+  `Global.h`; unless the `CONFIG` target has its own, the module generates a
+  forwarding `Global.h` in the build tree.
+- `OS` names the RTOS interface directory under `Sample/` (`FreeRTOSV11`,
+  `ThreadX`, `embOS`, `uCOS-III`, ...). Its `SEGGER_SYSVIEW_*.c` is compiled
+  into the library, which provides `SYSVIEW_X_OS_TraceAPI` (task list,
+  system time). `OS_TARGET` is the RTOS library; the two are linked both ways
+  (static libraries may be circular), because the RTOS hooks call SystemView
+  and the interface calls the RTOS:
+  - FreeRTOS: `FreeRTOSConfig.h` ends with
+    `#include "SEGGER_SYSVIEW_FreeRTOS.h"` (trace macros). The kernel picks
+    up the SystemView headers through the link. Set
+    `INCLUDE_xTaskGetIdleTaskHandle` so the idle task is recognized.
+  - ThreadX: `tx_user.h` defines `TX_ENABLE_EXECUTION_CHANGE_NOTIFY`. SEGGER's
+    ThreadX interface has no scheduler hooks, so the module adds
+    [threadx_execution_notify.c](../cmake/vendors/segger/systemview/threadx_execution_notify.c)
+    (`_tx_execution_thread_enter/exit`, `_tx_execution_isr_enter/exit`). The
+    Cortex-M ports only call the ISR hooks from `_tx_thread_context_save()`,
+    which Cortex-M ISRs do not use; record ISRs in the handler instead.
+    Thread readiness (`OnTaskStartReady`) is not reported, only execution.
+- Without `OS`, the application provides `SYSVIEW_X_OS_TraceAPI` itself (or
+  passes `nullptr` to `SEGGER_SYSVIEW_Init()`).
+- The runtime configuration is the application's: `SEGGER_SYSVIEW_Init()`
+  (by SEGGER convention inside `SEGGER_SYSVIEW_Conf()`) with the timestamp
+  and CPU frequency, the system description and the RAM base for IDs. The
+  default timestamp on Cortex-M is `DWT->CYCCNT`; the application must enable
+  it (on the Cortex-M7 after unlocking the DWT, `LAR = 0xC5ACCE55`).
+- SystemView needs the RTT configuration to allow two up buffers
+  (`SEGGER_RTT_MAX_NUM_UP_BUFFERS` >= 2; default 3).
+- Recording starts when the host sends the start command over the down
+  channel. The target looks for it in every recorded event and in
+  `SEGGER_SYSVIEW_IsStarted()`.
+
+#### Host side: `tools/sysview-bridge`
+
+The SystemView application reads RTT only through a J-Link. For other probes
+(the ST-LINK on Nucleo boards), [tools/sysview-bridge](../tools/sysview-bridge)
+reads the `SysView` channel with probe-rs and serves it as a SystemView
+**IP recorder** (32-byte hello exchange, then raw channel data both ways).
+
+```
+cargo build --release --manifest-path tools/sysview-bridge/Cargo.toml
+tools/sysview-bridge/target/release/sysview-bridge --chip STM32H755ZITx \
+  --ram 0x10000000:0x48000 \
+  --target 0:examples/h755zi-freertos/build/debug/firmware_cm7.elf \
+  --target 1:examples/h755zi-freertos/build/debug/firmware_cm4.elf
+```
+
+- One port per target, from `--port` (default 19111) upwards: here CM7 on
+  19111, CM4 on 19112. In SystemView: *Target > Recorder Configuration >
+  IP*, address `127.0.0.1`, port 19111 (or 19112), then *Start Recording*.
+  Run one SystemView instance per core.
+- `--ram START:SIZE` adds RAM that probe-rs' memory map of the chip lacks.
+  probe-rs rejects an RTT control block whose buffers are outside known RAM
+  ("control block has been corrupted"); its STM32H755 map has no CM4 alias of
+  D2 SRAM at `0x10000000`, so the CM4 needs `--ram 0x10000000:0x48000`.
+- The ELF is only used to find `_SEGGER_RTT`; `CORE:0x<address>` works too.
+  The bridge attaches without reset or halt, so the images must already run.
+- `--record <dir> --duration <s>` records without the SystemView
+  application: it sends the start command, saves the raw stream to
+  `<dir>/core<N>.bin` and prints the strings found in it (system
+  description, task, module and marker names), for checks on a headless
+  machine.
+- probe-rs holds the probe while the bridge runs; stop it before flashing.
+
 ### Vendor module errors
 
 `FATAL_ERROR` when: `GIT_TAG` or `FAMILY` is missing, the call order is
 wrong (`st_fetch_cmsis_device()` before `arm_fetch_cmsis_core()`,
 `st_add_hal()` / `st_add_cmsis_startup()` / `freertos_add_kernel()` /
-`threadx_add_kernel()` / `threadx_add_<component>()` / `segger_add_rtt()`
-before the matching fetch), a missing `SEGGER_RTT_Conf.h` in an RTT
-`CONFIG`, an unknown FreeRTOS or ThreadX port (the message lists the
+`threadx_add_kernel()` / `threadx_add_<component>()` / `segger_add_rtt()` /
+`segger_add_systemview()` before the matching fetch), a missing
+`SEGGER_RTT_Conf.h` or `SEGGER_SYSVIEW_Conf.h` in a `CONFIG`, a SystemView
+`OS` without `OS_TARGET` (or the reverse) or an unknown `OS` (the message
+lists the `Sample/` directories), an `OS_TARGET` that is not a static
+library, an unknown FreeRTOS or ThreadX port (the message lists the
 available ports), a component `KERNEL` that was not created by
 `threadx_add_kernel()`, an unknown NetX Duo addon or USBX part, USBX
 `PARTS network` without `NETX`, a FreeRTOS MPU port, an invalid `HEAP`, a
@@ -560,12 +650,12 @@ Checked with the unchanged module files:
 
 ## H755ZI examples
 
-Two examples run both cores of the STM32H755ZI, one under FreeRTOS and one
-under ThreadX. They share
+Three examples run both cores of the STM32H755ZI: one under FreeRTOS, one
+under ThreadX, and a bare-metal SystemView demo. They share
 [examples/common/stm32h755zi](../examples/common/stm32h755zi): the chip
 description (`stm32h755zi.cmake` with both `mcu_add_chip()` calls, the HAL
-config target and the startup / system file names), `stm32h7xx_hal_conf.h`
-and `shared_mailbox.h`.
+config target and the startup / system file names), `stm32h7xx_hal_conf.h`,
+`shared_mailbox.h` and the SystemView setup `sysview_h755.cc`.
 
 | | CM7 | CM4 |
 |---|---|---|
@@ -579,6 +669,7 @@ and `shared_mailbox.h`.
 | Extra regions | ITCM, AXI SRAM (`.ram_d1`), D3 SRAM (`.shared_d3`) | D3 SRAM (`.shared_d3`) |
 | LED task (NUCLEO-H755ZI-Q) | LD1, PB0, 500 ms | LD2, PE1, 250 ms |
 | SEGGER RTT | `h755::rtt_cm7`, `_SEGGER_RTT` in DTCM (not cached) | `h755::rtt_cm4`, `_SEGGER_RTT` in D2 SRAM (CM4 has no cache) |
+| SEGGER SystemView | `h755::sysview_cm7`, buffer in DTCM, RAM base `0x20000000` | `h755::sysview_cm4`, buffer in D2 SRAM, RAM base `0x10000000` |
 
 - Both examples log over RTT channel 0 (`SEGGER_RTT_printf()`, default
   configuration): a start line from `main()` and one line per blink, the
@@ -586,6 +677,15 @@ and `shared_mailbox.h`.
   its own control block; connect the J-Link to the core whose output you
   want (one RTT session per core, e.g. device `STM32H755ZI_M7` / `_M4`).
   `SEGGER_RTT_VERSION` in the examples selects the RTT tag.
+- All three examples record SystemView on both cores
+  (`SEGGER_SYSTEMVIEW_VERSION`, default `V4.12.0`). `h755::ConfigureSysview()`
+  in `sysview_h755.cc` enables the DWT cycle counter (timestamp at
+  `SystemCoreClock`, 64 MHz on the reset clock), sends the system description
+  (`N=<example> <core>,O=<OS>`, `D=STM32H755ZI CM7|CM4`, `I#15=SysTick`) and
+  sets the core's RAM base. Each image calls it once in `main()`, before the
+  first task or thread is created. View with
+  [tools/sysview-bridge](../tools/sysview-bridge) (any probe-rs probe) or a
+  J-Link.
 
 - D3 SRAM at `0x38000000` is shared. Both images place their `.shared_d3`
   section at the same address, so `shared_mailbox.h` is the layout contract
@@ -614,6 +714,13 @@ and `shared_mailbox.h`.
 - `common/rtos_glue.cc` defines `SysTick_Handler`, which drives both the HAL
   tick and the FreeRTOS tick (both 1 kHz), and the stack overflow hook
   (trap into the debugger).
+- SystemView: `FreeRTOSConfig.h` includes `SEGGER_SYSVIEW_FreeRTOS.h` at
+  the end and sets `INCLUDE_xTaskGetIdleTaskHandle` /
+  `INCLUDE_uxTaskGetStackHighWaterMark`; `segger_add_systemview(OS
+  FreeRTOSV11 OS_TARGET h755::rtos_<core>)`. The port's SysTick handler
+  records itself (`traceISR_ENTER`). On the CM7 the blink task notifies a
+  higher-priority `checksum` task (`xTaskNotifyGive`), so the trace shows a
+  notification and the preemption it causes.
 - The CM7 uses the `ARM_CM4F` port, which assumes its core revision is not
   r0p1 (r0p1 cores need `ARM_CM7/r0p1`); verify in the device errata sheet.
 
@@ -634,6 +741,12 @@ and `shared_mailbox.h`.
 - `main()` calls `__disable_irq()` before `tx_kernel_enter()`: ThreadX does
   not disable interrupts during kernel entry, but `HAL_Init()` has already
   started SysTick (see [Toolchain pitfalls](#toolchain-pitfalls)).
+- SystemView: `tx_user.h` defines `TX_ENABLE_EXECUTION_CHANGE_NOTIFY`;
+  `segger_add_systemview(OS ThreadX OS_TARGET h755::rtos_<core>)` brings
+  SEGGER's ThreadX interface and the module's scheduler hooks.
+  `SysTick_Handler` records itself (`SEGGER_SYSVIEW_RecordEnterISR()` /
+  `RecordExitISR[ToScheduler]()`). On the CM7 the trace shows the middleware
+  demo thread and the NetX Duo IP threads besides blink.
 - The CM7 image also links FileX, LevelX (with FileX), NetX Duo, USBX
   (`device_classes`, with `NETX`) and GUIX, all with their default
   configuration. `cm7/middleware_demo.cc` runs in its own thread: FileX on a
@@ -647,13 +760,65 @@ and `shared_mailbox.h`.
   be overridden one by one (e.g. the NetX Duo hotfix tag
   `v6.5.2.202603a_rel`).
 
+### SystemView: `examples/h755zi-systemview`
+
+Bare metal, both images from one source,
+[app/main.cc](../examples/h755zi-systemview/app/main.cc) (`CORE_CM7` /
+`CORE_CM4` select LED and button code).
+
+- A cooperative scheduler runs three jobs from a `constexpr` table (`filter`
+  every 5 ms, `blink`, `report` every second) and reports each job as a
+  SystemView task (`OnTaskStartExec` / `OnTaskStopExec`, `OnIdle`, task
+  list through its own `SYSVIEW_X_OS_TraceAPI`): the pattern for
+  instrumenting a home-grown scheduler or super loop.
+- Further SystemView features: SysTick (both cores) and the USER button B1
+  on PC13 (CM7, `I#56=EXTI15_10`) as ISRs; a marker around each FIR block,
+  named in the start callback; a user module `App` with the events
+  `FilterBlock` / `FilterDone`; a data plot of the filter output peak
+  (`SEGGER_SYSVIEW_RegisterData` / `SampleData`); `SEGGER_SYSVIEW_PrintfHost`
+  (formatted on the host) and `SEGGER_SYSVIEW_Warn` when a job overruns its
+  period.
+- B1 on the CM7 toggles the filter load between 1 and 128 blocks of 64 samples per run,
+  which overruns the 5 ms period: the job grows in the timeline and
+  warnings appear.
+- `config/SEGGER_SYSVIEW_Conf.h` is the project configuration
+  (`segger_add_systemview(CONFIG h755::sysview_conf)`): 4 KiB SystemView
+  buffer instead of 1 KiB, shorter maximum string length. No RTOS, so no
+  `OS` / `OS_TARGET`; RTT is only SystemView's transport (no `PRINTF`).
+
 ### Verified build results
 
 arm-none-eabi-gcc 15.2.0, CMake 4.3, Ninja; CMSIS_6 v6.1.0, cmsis-device-h7
 v1.10.7, stm32h7xx-hal-driver v1.11.6, FreeRTOS-Kernel V11.3.2, ThreadX
-v6.5.2.202603_rel. Both examples build without warnings in both presets,
+v6.5.2.202603_rel, SEGGER RTT V8.58.0, SystemView V4.12.0. All three examples
+build without warnings in both presets,
 including the HAL and kernel sources and `mcu::warnings` on the application
-code. Not yet run on hardware.
+code.
+
+On hardware (NUCLEO-H755ZI-Q, ST-LINK V3, probe-rs 0.32, flashed with
+`probe-rs download` per core, then `probe-rs reset`), all three examples in
+Debug, both cores at once through one `sysview-bridge` session:
+
+| Example | Recorded (3 s) | Seen in the stream |
+|---|---|---|
+| FreeRTOS | CM7 32 KiB/s, CM4 32 KiB/s | system description, tasks `checksum`, `blink` (CM7) / `blink` (CM4) |
+| ThreadX | CM7 8.3 KiB/s, CM4 8.0 KiB/s | threads `middleware`, `blink`, GUIX / FileX / USBX threads, mutexes, queues, timers |
+| SystemView | CM7 15.5 KiB/s, CM4 15.7 KiB/s | jobs, marker `FIR block`, plot `FIR peak`, `App` module, `PrintfHost` format string |
+
+- `_SYSVIEW_Globals.MainContext.DropCount` stayed 0 on both FreeRTOS cores
+  (1 KiB default buffer) after two recordings. It only counts packets
+  dropped while an overflow packet could not be sent, so single drops are
+  not excluded.
+- SystemView example: no overrun warning at the light load; with the load
+  forced to 128 blocks (`filter_blocks` written with `probe-rs write`), 10
+  warnings in 3 s.
+- The IP recorder mode was exercised with a stand-in client (hello, start,
+  stop) on ports 19111 and 19112; the SystemView application itself was not
+  run.
+- RTT channel 0 (`probe-rs attach`, CM7): FreeRTOS `cm7: blink N` every
+  500 ms; ThreadX `cm7: ThreadX start` and `cm7: middleware demo: filex=0
+  levelx=0 netx=0 usbx=0 guix=0 (0 = ok)`, so all middleware steps pass on
+  the board.
 
 FreeRTOS example:
 
@@ -664,7 +829,7 @@ FreeRTOS example:
 | `SysTick_Handler` | `rtos_glue.cc` (HAL + FreeRTOS tick) | same |
 | `shared_mailbox` | `0x38000000` | `0x38000000` |
 | `crt0.o`, `malloc`, heap linked | no | no |
-| Flash used, Debug / MinSizeRel | 12068 B / 6996 B | 11448 B / 6840 B |
+| Flash used, Debug / MinSizeRel (with SystemView) | 22860 B / 12700 B | 20536 B / 11656 B |
 
 - Each HAL library and each kernel is compiled once per core (8 objects
   each), with that core's CPU flags.
@@ -678,8 +843,15 @@ ThreadX example:
 | `malloc` linked | no | no |
 | Kernel | 192 objects, `cortex_m7`, `-mfpu=fpv5-d16` | 192 objects, `cortex_m4`, `-mfpu=fpv4-sp-d16` |
 | Middleware | FileX 212, LevelX 65, NetX Duo 511, USBX 447, GUIX 1315 objects, CM7 flags | none |
-| Flash used, Debug / MinSizeRel | 127160 B / 67468 B | 14104 B / 8016 B |
-| DTCM / RAM used, Debug | DTCM 117088 B of 128 KiB, AXI SRAM 128 KiB | RAM_D2 5744 B |
+| Flash used, Debug / MinSizeRel (with SystemView) | 134612 B / 71388 B | 22464 B / 12800 B |
+| DTCM / RAM used, Debug | DTCM 119616 B of 128 KiB, AXI SRAM 128 KiB | RAM_D2 8264 B |
+
+SystemView example: flash Debug / MinSizeRel 16660 B / 8064 B (CM7),
+16068 B / 7676 B (CM4); about 10 KiB RAM per core, of which 4 KiB is the
+SystemView buffer. `_UpBuffer` is 0x1000 bytes (project config in effect).
+In all images: `_SEGGER_RTT` and the SystemView buffers in DTCM (CM7) or D2
+SRAM (CM4), no `malloc`; ThreadX images contain `_tx_execution_thread_enter`
+/ `_exit` from the module.
 
 The middleware symbols checked in the CM7 image: `_fx_media_format`,
 `_fx_ram_driver`, `_fx_nor_flash_simulator_driver`, `_lx_nor_flash_open`,
@@ -765,8 +937,8 @@ the checks stay active in Debug, and a failure stops in the debugger.
 - The memory values in the example come from the RM0399 memory map but have
   not been checked against the PDF. Verify them against the current
   reference manual.
-- The example has not been run on hardware. It runs on the reset clock and
-  has no power supply (`HAL_PWREx_ConfigSupply`), clock tree or HSEM boot
+- The examples run on hardware, but on the reset clock (HSI 64 MHz), with no
+  power supply (`HAL_PWREx_ConfigSupply`), clock tree or HSEM boot
   synchronization between the cores yet.
 - SysTick is shared by the HAL tick and the RTOS tick. ST recommends a basic
   timer (e.g. TIM6/TIM7) as HAL time base when an RTOS uses SysTick; switch
@@ -779,8 +951,9 @@ the checks stay active in Debug, and a failure stops in the debugger.
   non-sparse path (full clone) is not exercised.
 - Defining the same chip twice is a `FATAL_ERROR`, also when two
   subprojects of one superbuild do it.
-- RTT output has not been watched on hardware yet (no probe in the loop);
-  symbols, placement and linking are verified.
+- RTT channel 0 has been watched on the CM7 only; `probe-rs attach` on the
+  CM4 runs into the same memory map gap as above (needs a custom chip
+  description with the `0x10000000` alias).
 - Not covered yet: FreeRTOS MPU ports, FreeRTOS+ libraries (TCP, CLI, ...),
   ThreadX SMP / module ports, NetX Duo `azure_iot`, TSN and utilities.
 - The ThreadX middleware runs with RAM-backed drivers only. Real drivers
@@ -788,6 +961,8 @@ the checks stay active in Debug, and a failure stops in the debugger.
   Duo, the USB OTG controller for USBX, a display for GUIX) are the next
   step; the STM32 USBX controller drivers come from ST, not from the USBX
   repository.
-- DTCM of the ThreadX CM7 image is 89 % used, mostly by the LevelX NOR
+- The SystemView application has not been connected to the bridge yet
+  (verified with a stand-in client and the headless recording only).
+- DTCM of the ThreadX CM7 image is 91 % used, mostly by the LevelX NOR
   simulator (64 KiB) and the two `FX_MEDIA` blocks; drop the simulator or
   move `.data` / `.bss` to AXI SRAM (`RAM_REGION RAM_D1`) when adding more.

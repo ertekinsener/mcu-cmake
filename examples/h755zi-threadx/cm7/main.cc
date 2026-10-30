@@ -10,6 +10,7 @@
 #include "SEGGER_RTT.h"
 #include "shared_mailbox.h"
 #include "stm32h7xx_hal.h"
+#include "sysview_h755.h"
 #include "tx_api.h"
 #include "tx_glue.h"
 
@@ -67,6 +68,8 @@ int main() {
   InitLed();
   SEGGER_RTT_Init();
   SEGGER_RTT_WriteString(0, "cm7: ThreadX start\r\n");
+  // Before tx_kernel_enter(): SystemView asks for the thread list on start.
+  h755::ConfigureSysview("N=h755zi-threadx cm7,O=ThreadX");
 
   __disable_irq();  // see tx_glue.h
   tx_kernel_enter();

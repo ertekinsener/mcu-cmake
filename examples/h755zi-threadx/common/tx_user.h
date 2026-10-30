@@ -15,4 +15,8 @@
 // timer callbacks are short.
 #define TX_TIMER_PROCESS_IN_ISR
 
+// Scheduler hooks for SEGGER SystemView (_tx_execution_thread_enter/exit,
+// implemented by the segger systemview module for OS ThreadX).
+#define TX_ENABLE_EXECUTION_CHANGE_NOTIFY
+
 #endif  // EXAMPLES_H755ZI_THREADX_COMMON_TX_USER_H_

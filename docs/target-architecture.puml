@@ -6,8 +6,9 @@
 ' its CM7 image adds h755::filex_cm7, levelx_cm7, netx_cm7, usbx_cm7 and
 ' guix_cm7, each linked to h755::rtos_cm7 (KERNEL).
 ' Project libraries use namespaced aliases (h755::hal_cm7 -> h755_hal_cm7).
-' Both examples also link h755::rtt_cm7 / h755::rtt_cm4 (segger_add_rtt(),
-' linked to the chip target) for logging.
+' Both RTOS examples also link h755::rtt_cm7 / h755::rtt_cm4 (segger_add_rtt(),
+' linked to the chip target) for logging, and h755::sysview_cm7 / _cm4
+' (segger_add_systemview()), drawn below for the CM7.
 ' Solid arrows: target_link_libraries (consumer --> dependency).
 ' Dotted arrows: function calls / generated files.
 
@@ -32,12 +33,14 @@ package "cmake/mcu (vendor-neutral core)" {
   [mcu::warnings] as WARN
 }
 
-package "cmake/vendors/arm + st + freertos + threadx" {
+package "cmake/vendors/arm + st + freertos + threadx + segger" {
   [arm_fetch_cmsis_core()] as FETCHCORE
   [st_fetch_cmsis_device()\nst_add_cmsis_startup()] as ADDSTARTUP
   [st_fetch_hal()\nst_add_hal()] as ADDHAL
   [freertos_fetch_kernel()\nfreertos_add_kernel()] as ADDRTOS
   [threadx_fetch_kernel()\nthreadx_add_kernel()] as ADDTX
+  [segger_fetch_rtt()\nsegger_add_rtt()] as ADDRTT
+  [segger_fetch_systemview()\nsegger_add_systemview()] as ADDSV
 }
 
 cloud "Upstream git\n(tags chosen in the example)" {
@@ -45,6 +48,7 @@ cloud "Upstream git\n(tags chosen in the example)" {
   [cmsis-device-h7 v1.10.7] as U_DEV
   [stm32h7xx-hal-driver v1.11.6] as U_HAL
   [FreeRTOS-Kernel V11.3.2] as U_RTOS
+  [SEGGERMicro/RTT V8.58.0,\nSEGGERMicro/SystemView V4.12.0] as U_SEGGER
 }
 
 package "Header-only targets" {
@@ -62,10 +66,12 @@ package "examples/common/stm32h755zi + examples/h755zi-freertos" {
   [h755::freertos_conf (INTERFACE)\nFreeRTOSConfig.h] as RTOSCONF
   [h755::hal_cm7 (STATIC)\nhal, cortex, rcc, gpio,\nhsem, pwr (+ _ex)] as HAL7
   [h755::rtos_cm7 (STATIC)\nkernel, port ARM_CM4F,\nHEAP NONE] as RTOS7
+  [h755::rtt_cm7 (STATIC)\nSEGGER_RTT.c, ASM,\nSEGGER_RTT_printf.c] as RTT7
+  [h755::sysview_cm7 (STATIC)\nSEGGER_SYSVIEW.c,\nSample/FreeRTOSV11 interface] as SV7
   [h755::startup_cm7 (OBJECT)\nstartup_stm32h755xx.s\nsystem_..._dualcore_boot_cm4_cm7.c] as START7
   [firmware_cm7.elf] as FW7
   [firmware_cm7.ld] as LD7
-  [hal_cm4 / rtos_cm4 / startup_cm4 /\nfirmware_cm4.elf\n(same structure)] as CM4SIDE
+  [hal_cm4 / rtos_cm4 / rtt_cm4 /\nsysview_cm4 / startup_cm4 /\nfirmware_cm4.elf\n(same structure)] as CM4SIDE
 }
 
 ADDCHIP ..> CM7CHIP : creates
@@ -79,6 +85,11 @@ ADDHAL ..> FETCH
 ADDRTOS ..> FETCH
 ADDRTOS ..> RTOS7 : creates
 FETCH ..> U_RTOS
+FETCH ..> U_SEGGER
+ADDRTT ..> FETCH
+ADDSV ..> FETCH
+ADDRTT ..> RTT7 : creates
+ADDSV ..> SV7 : creates
 FETCH ..> U_CORE
 FETCH ..> U_DEV
 FETCH ..> U_HAL
@@ -101,6 +112,12 @@ FW7 --> HAL7
 FW7 --> RTOS7
 RTOS7 --> CM7CHIP
 RTOS7 --> RTOSCONF
+FW7 --> RTT7
+FW7 --> SV7
+RTT7 --> CM7CHIP
+SV7 --> RTT7
+SV7 --> RTOS7 : OS_TARGET
+RTOS7 --> SV7 : trace hooks\n(circular, static)
 FW7 --> CXX
 FW7 --> NANO
 FW7 --> WARN

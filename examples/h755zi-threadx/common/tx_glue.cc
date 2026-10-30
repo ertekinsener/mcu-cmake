@@ -3,6 +3,7 @@
 
 #include <cstdint>
 
+#include "SEGGER_SYSVIEW.h"
 #include "stm32h7xx_hal.h"
 #include "tx_api.h"
 #include "tx_glue.h"
@@ -52,11 +53,19 @@ extern "C" void _tx_initialize_low_level() {
 }
 
 // SysTick drives both the HAL tick (HAL_Delay, HAL timeouts) and the ThreadX
-// tick.
+// tick. Recorded for SystemView here: Cortex-M ISRs do not go through
+// _tx_thread_context_save(), so the kernel's ISR hooks never run.
 extern "C" void SysTick_Handler() {
+  SEGGER_SYSVIEW_RecordEnterISR();
   HAL_IncTick();
   if (tick_enabled) {
     _tx_timer_interrupt();
+  }
+  // A thread woken by the tick (sleep timeout) runs after this ISR.
+  if (_tx_thread_execute_ptr != _tx_thread_current_ptr) {
+    SEGGER_SYSVIEW_RecordExitISRToScheduler();
+  } else {
+    SEGGER_SYSVIEW_RecordExitISR();
   }
 }
 

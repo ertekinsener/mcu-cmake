@@ -8,6 +8,7 @@
 #include "SEGGER_RTT.h"
 #include "shared_mailbox.h"
 #include "stm32h7xx_hal.h"
+#include "sysview_h755.h"
 #include "task.h"
 
 namespace {
@@ -51,6 +52,7 @@ int main() {
   InitLed();
   SEGGER_RTT_Init();
   SEGGER_RTT_WriteString(0, "cm4: FreeRTOS start\r\n");
+  h755::ConfigureSysview("N=h755zi-freertos cm4,O=FreeRTOS");
 
   xTaskCreateStatic(BlinkTask, "blink", blink_stack.size(), nullptr,
                     tskIDLE_PRIORITY + 1, blink_stack.data(), &blink_tcb);

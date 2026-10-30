@@ -3,3 +3,4 @@ build/
 
 # Upstream ObKo/stm32-cmake copy, kept only as a reference
 /stm32-cmake/
+/tools/*/target/
